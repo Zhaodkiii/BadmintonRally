@@ -1,0 +1,382 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		BA1100000000000000000009 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C30000000000000000000009 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C30000000000000000000006;
+			remoteInfo = BadmintonRally;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		BA1100000000000000000004 /* ClubFlowTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = ClubFlowTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C30000000000000000000001 /* BadmintonRally.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BadmintonRally.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CA7700000000000000000003 /* RallyCapture.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = RallyCapture.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		BA1100000000000000000003 /* UITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		C30000000000000000000002 /* iPhoneApp */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = iPhoneApp;
+			sourceTree = "<group>";
+		};
+		CA7700000000000000000001 /* CaptureShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CaptureShared;
+			sourceTree = "<group>";
+		};
+		CA7700000000000000000002 /* MacCapture */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MacCapture;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C30000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		C30000000000000000000004 = {
+			isa = PBXGroup;
+			children = (
+				CA7700000000000000000001 /* CaptureShared */,
+				CA7700000000000000000002 /* MacCapture */,
+				BA1100000000000000000003 /* UITests */,
+				C30000000000000000000002 /* iPhoneApp */,
+				C30000000000000000000005 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C30000000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				CA7700000000000000000003 /* RallyCapture.app */,
+				BA1100000000000000000004 /* ClubFlowTests.xctest */,
+				C30000000000000000000001 /* BadmintonRally.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		BA1100000000000000000000 /* ClubFlowTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BA1100000000000000000001 /* Build configuration list for PBXNativeTarget "ClubFlowTests" */;
+			buildPhases = (
+				BA1100000000000000000002 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				BA1100000000000000000008 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				BA1100000000000000000003 /* UITests */,
+			);
+			name = ClubFlowTests;
+			productName = ClubFlowTests;
+			productReference = BA1100000000000000000004 /* ClubFlowTests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		C30000000000000000000006 /* BadmintonRally */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C3000000000000000000000B /* Build configuration list for PBXNativeTarget "BadmintonRally" */;
+			buildPhases = (
+				C30000000000000000000007 /* Sources */,
+				C30000000000000000000003 /* Frameworks */,
+				C30000000000000000000008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C30000000000000000000002 /* iPhoneApp */,
+				CA7700000000000000000001 /* CaptureShared */,
+			);
+			name = BadmintonRally;
+			productName = BadmintonRally;
+			productReference = C30000000000000000000001 /* BadmintonRally.app */;
+			productType = "com.apple.product-type.application";
+		};
+		CA7700000000000000000008 /* RallyCapture */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CA7700000000000000000007 /* Build configuration list for PBXNativeTarget "RallyCapture" */;
+			buildPhases = (
+				CA7700000000000000000004 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				CA7700000000000000000001 /* CaptureShared */,
+				CA7700000000000000000002 /* MacCapture */,
+			);
+			name = RallyCapture;
+			productName = RallyCapture;
+			productReference = CA7700000000000000000003 /* RallyCapture.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C30000000000000000000009 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+			};
+			buildConfigurationList = C3000000000000000000000A /* Build configuration list for PBXProject "BadmintonRally" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = C30000000000000000000004;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = C30000000000000000000005 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CA7700000000000000000008 /* RallyCapture */,
+				BA1100000000000000000000 /* ClubFlowTests */,
+				C30000000000000000000006 /* BadmintonRally */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C30000000000000000000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		BA1100000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C30000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CA7700000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		BA1100000000000000000008 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C30000000000000000000006 /* BadmintonRally */;
+			targetProxy = BA1100000000000000000009 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		BA1100000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEVELOPMENT_TEAM = 4AN6PV98G7;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daokaihua.badmintonrally.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = BadmintonRally;
+			};
+			name = Debug;
+		};
+		BA1100000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEVELOPMENT_TEAM = 4AN6PV98G7;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daokaihua.badmintonrally.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = BadmintonRally;
+			};
+			name = Release;
+		};
+		C3000000000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		C3000000000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		C3000000000000000000000E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4AN6PV98G7;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/PhoneNetwork.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "晚风球社";
+				INFOPLIST_KEY_NSMotionUsageDescription = "使用手机运动识别挥拍和击球节奏。";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daokaihua.badmintonrally;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		C3000000000000000000000F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4AN6PV98G7;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/PhoneNetwork.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "晚风球社";
+				INFOPLIST_KEY_NSMotionUsageDescription = "使用手机运动识别挥拍和击球节奏。";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daokaihua.badmintonrally;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		CA7700000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4AN6PV98G7;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/MacCapture.plist;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daokaihua.rallycapture;
+				PRODUCT_NAME = RallyCapture;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Debug;
+		};
+		CA7700000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4AN6PV98G7;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/MacCapture.plist;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daokaihua.rallycapture;
+				PRODUCT_NAME = RallyCapture;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		BA1100000000000000000001 /* Build configuration list for PBXNativeTarget "ClubFlowTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BA1100000000000000000005 /* Debug */,
+				BA1100000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C3000000000000000000000A /* Build configuration list for PBXProject "BadmintonRally" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C3000000000000000000000C /* Debug */,
+				C3000000000000000000000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C3000000000000000000000B /* Build configuration list for PBXNativeTarget "BadmintonRally" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C3000000000000000000000E /* Debug */,
+				C3000000000000000000000F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CA7700000000000000000007 /* Build configuration list for PBXNativeTarget "RallyCapture" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CA7700000000000000000005 /* Debug */,
+				CA7700000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = C30000000000000000000009 /* Project object */;
+}
