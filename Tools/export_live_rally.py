@@ -1,0 +1,1 @@
+../Clients/macOS/Resources/export_live_rally.py

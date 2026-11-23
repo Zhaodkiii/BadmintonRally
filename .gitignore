@@ -33,9 +33,9 @@ __pycache__/
 .venv/
 
 # Local recordings, transcripts, and training exports
-/ScreenRecording_*
-/美术参考/模拟器比赛画面.png
-/美术参考/采集示范-正手上挑.png
+/docs/参考素材/ScreenRecording_*
+/docs/参考素材/美术参考/模拟器比赛画面.png
+/docs/参考素材/美术参考/采集示范-正手上挑.png
 MotionTrials/
 RallyCaptureSessions/
 /samples/

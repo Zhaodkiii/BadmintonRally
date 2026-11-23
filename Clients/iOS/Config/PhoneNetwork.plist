@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>采集时使用后置相机，在你松开击球标记按钮时保存参考照片。</string>
+	<key>UIFileSharingEnabled</key><true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key><true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>查找附近的采集工作台并核对配对码。</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>查找附近的采集工作台并核对配对码。</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_brcapture._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>在开发采集时连接同一局域网的 Mac 和 iPhone，同步保存挥拍数据。</string>
+</dict>
+</plist>

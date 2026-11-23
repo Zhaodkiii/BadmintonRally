@@ -27,7 +27,17 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "NO">
-      <Testables><TestableReference skipped="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="BA1100000000000000000000" BuildableName="ClubFlowTests.xctest" BlueprintName="ClubFlowTests" ReferencedContainer="container:BadmintonRally.xcodeproj"/></TestableReference>
+      <Testables>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "BA1100000000000000000000"
+               BuildableName = "ClubFlowTests.xctest"
+               BlueprintName = "ClubFlowTests"
+               ReferencedContainer = "container:BadmintonRally.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
