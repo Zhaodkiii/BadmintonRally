@@ -67,7 +67,7 @@ import Foundation
   }
 
   static func checkNetTiming() {
-    func incoming(_ fraction: Double, x: Double = 0) -> Rally {
+    func incoming(_ targetDepth: Double, x: Double = 0) -> Rally {
       var rally = Rally()
       rally.practice = true
       rally.playerServes = false
@@ -75,7 +75,7 @@ import Foundation
       rally.readyToServe()
       rally.tick(0.91)
       let flight = rally.flight!
-      for _ in 0..<100 { rally.tick(flight.duration * fraction / 100) }
+      while flight.at(rally.now).y < targetDepth { rally.tick(0.002) }
       rally.playerX = x
       // Record the lateral offset in the same history used for delayed IMU decisions.
       rally.tick(0.00001)
@@ -83,18 +83,18 @@ import Foundation
     }
     let strong = SwingImpact(power: 1, sweep: 1)
     let soft = SwingImpact(power: 0.1, sweep: 0.2)
-    var early = incoming(0.15)
+    var early = incoming(0.43)
     precondition(early.swing(.smash, aim: 0, impact: strong) == .early && early.flight!.incoming)
     precondition(early.swing(.lift, aim: 0) == .locked)
-    var kill = incoming(0.52), touch = kill
+    var kill = incoming(0.515), touch = kill
     precondition(kill.swing(.smash, aim: 0, impact: strong) == .accepted && kill.lastShot == .smash)
     precondition(kill.flight!.netCollision == nil && kill.flight!.at(kill.now + 0.02).z < kill.flight!.from.z)
     precondition(touch.swing(.lift, aim: 0, impact: soft) == .accepted && touch.lastShot == .net && touch.flight!.netCollision == nil)
-    var push = incoming(0.65), stretch = incoming(0.65, x: 0.44)
+    var push = incoming(0.55), stretch = incoming(0.55, x: 0.44)
     precondition(push.swing(.drive, aim: 0, impact: strong) == .accepted)
     precondition(stretch.swing(.drive, aim: 0, impact: strong) == .accepted)
     precondition(stretch.flight!.to.y > push.flight!.to.y && stretch.flight!.netCollision == nil)
-    var lift = incoming(0.83), shallow = lift, low = lift, miss = incoming(0.83, x: 0.49)
+    var lift = incoming(0.62), shallow = lift, low = lift, miss = incoming(0.62, x: 0.49)
     precondition(lift.swing(.lift, aim: 0, impact: strong) == .accepted && lift.flight!.netCollision == nil)
     precondition(shallow.swing(.lift, aim: 0, impact: soft) == .accepted && shallow.flight!.netCollision == nil)
     precondition(lift.flight!.to.y < shallow.flight!.to.y)

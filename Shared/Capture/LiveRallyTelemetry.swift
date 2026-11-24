@@ -35,6 +35,9 @@ struct LiveRallyTelemetry: Codable {
     let beforeNet, outsideReach: Bool
     let outgoing: Flight
     var observedReply: String? = nil
+    var power, sweep, braking: Double?
+    var onBackhandSide, overheadByPosition, estimatedBackhand: Bool?
+    var predictedNetHit: Bool?
   }
 
   struct Event: Codable {

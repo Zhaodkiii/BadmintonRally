@@ -116,6 +116,16 @@ struct RallyPointReview: View {
               Text("实际　" + (row.actual.isEmpty ? "无回球记录" : row.actual) + "　　" + row.result)
               if let c = row.contact {
                 Text(String(format: "%@ · 相对网带 %+.2f m · 力度 %.2f · 横向 %+.2f · 上下 %+.2f",c.area,c.heightAboveNetMeters,c.strength,c.lateral,c.vertical))
+                if let power = c.power, let sweep = c.sweep {
+                  Text(String(format: "挥动力度 %.2f · 挥幅 %.2f", power, sweep)
+                       + (c.braking.map { String(format: " · 触球前减速 %.2f", $0) } ?? ""))
+                }
+                if let side = c.onBackhandSide {
+                  Text((side ? "击球点在反手侧" : "击球点在正手侧")
+                       + (c.overheadByPosition == true ? " · 站位允许绕头" : "")
+                       + (c.estimatedBackhand.map { $0 ? " · 推定反手" : " · 推定正手" } ?? " · 出拍侧待核"))
+                }
+                if c.predictedNetHit == true { Text("预计触网").foregroundStyle(.orange) }
                 if c.beforeNet || c.outsideReach { Text(c.beforeNet ? "按键时球还在对面" : "按键时超出建议接球范围").foregroundStyle(.orange) }
               }
               HStack {

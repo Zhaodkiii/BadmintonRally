@@ -780,7 +780,11 @@ struct ClubView: View {
             heightAboveNetMeters: (ball.z-Flight.netHeight)*1.524/Flight.netHeight,
             strength: impact.strength, vertical: impact.verticalSweep, lateral: aim,
             beforeNet: ball.y < 0.5, outsideReach: !inReach, outgoing: snapshot(flight),
-            observedReply: game.returnDescription(incoming: incoming, outgoing: flight))
+            observedReply: game.returnDescription(incoming: incoming, outgoing: flight),
+            power: impact.power, sweep: impact.sweep, braking: impact.braking,
+            onBackhandSide: (ball.x - game.playerX) * (game.leftHanded ? -1 : 1) < 0,
+            overheadByPosition: flight.overheadFromBackhandCorner, estimatedBackhand: flight.probableBackhand,
+            predictedNetHit: flight.netCollision != nil)
           liveCapture.add(.init(time: time, kind: "receiveContact", text: ball.contactArea,
                                 gameTime: at, contact: record))
         }

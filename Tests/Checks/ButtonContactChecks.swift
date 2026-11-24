@@ -24,6 +24,10 @@ import Foundation
         precondition(copy.swing(stroke, aim: 0.4, impact: impact, confirmedByButton: true) == .accepted)
         let reply = copy.flight!
         precondition(!reply.incoming && reply.to.x >= reply.from.x)
+        if scene == .defense && stroke == .drive && power == 0.18 {
+          precondition(reply.shot == .net && reply.returnedSmash)
+          precondition(reply.netCollision == nil && reply.to.y > 0.35)
+        }
         if scene == .netLow && stroke == .smash { precondition(reply.netCollision != nil) }
         if scene == .high && stroke == .drive { precondition(reply.shot == .net && reply.netCollision == nil) }
       }
@@ -55,7 +59,46 @@ import Foundation
     precondition(reply(load: -0.6,height: 0.44,aim: 0.9).to.x > push.to.x)
   }
 
+  static func checkMeasuredReturns() {
+    func sample(_ scene: CollectionScene, _ stroke: Stroke, _ power: Double, _ sweep: Double,
+                _ vertical: Double, aim: Double = 0.15, fps: Int = 60, braking: Double? = nil) -> Flight {
+      var game = Rally()
+      game.collectionScene = scene
+      game.intendedReply = "故意设置无关目标"
+      game.readyToServe()
+      for _ in 0..<(fps*4) {
+        game.tick(1/Double(fps))
+        if let f = game.flight, let at = game.predictedIntercept, f.at(game.now).y >= at.y {
+          let impact = SwingImpact(power:power,sweep:sweep,verticalSweep:vertical,braking:braking)
+          precondition(game.swing(stroke,aim:aim,impact:impact,confirmedByButton:true) == .accepted)
+          return game.flight!
+        }
+      }
+      preconditionFailure("未能生成接球场景")
+    }
+    func launchSlope(_ f: Flight) -> Double {
+      let next = f.at(f.start + 0.001)
+      return (next.z-f.from.z)*1.524/Flight.netHeight / hypot((next.x-f.from.x)*3.05,(next.y-f.from.y)*13.4)
+    }
+    for fps in [30,60,120] {
+      let kill = sample(.netHigh,.smash,0.78,0.30,-0.77,fps:fps)
+      let push = sample(.netHigh,.drive,0.54,0.65,0.07,fps:fps)
+      let touch = sample(.netHigh,.drive,0.16,0.15,0.13,fps:fps)
+      precondition((1.85...1.98).contains(kill.from.z*1.524/Flight.netHeight))
+      precondition(kill.netCollision == nil && push.netCollision == nil && touch.netCollision == nil)
+      precondition(launchSlope(kill) < launchSlope(push) && push.to.y < touch.to.y)
+      let tap = sample(.halfHigh,.smash,0.64,0.28,-0.61,fps:fps)
+      let attack = sample(.halfHigh,.smash,0.86,0.84,-0.77,fps:fps)
+      precondition(tap.netCollision == nil && tap.to.y > attack.to.y)
+      precondition(sample(.netLow,.smash,0.80,0.80,-0.78,fps:fps).netCollision != nil)
+      let block = sample(.flat,.drive,0.50,0.27,0.12,fps:fps,braking:0.65)
+      let drive = sample(.flat,.drive,0.50,0.27,0.12,fps:fps,braking:0.05)
+      precondition(block.shot == .net && block.netCollision == nil && drive.shot == .drive)
+    }
+  }
+
   static func main() {
+    checkMeasuredReturns()
     checkNetApproach()
     let feet = Position(x: 0,y: 0.62)
     let high = Position(x: 0,y: 0.58,z: 2.64 * Flight.netHeight / 1.524)

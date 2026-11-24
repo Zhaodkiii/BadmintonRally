@@ -139,7 +139,6 @@ struct ButtonSwing {
     }
     let sweep = tanh(turn / 2.0)
     var recognized = serving && !left ? serveName(pre, at: t) : nil
-    let probableBackhand = recognized?.hasPrefix("反手") == true
     if let name = recognized {
       // Predicted grip labels can be confident even when the stroke scarcely moves.
       // Veto a conflicting style without assuming that a large backsided lift is a flick.
@@ -158,8 +157,17 @@ struct ButtonSwing {
         kind = launchSweep > 0.35 && power > 0.38 ? .lift : .drive
       }
     }
+    // Compare a short trailing window to the sustained lobe. A single noisy
+    // button frame should not turn an attacking drive into a defensive block.
+    let tail = pre.filter { $0.t >= t - 0.045 }
+    var braking: Double?
+    if tail.count >= 2 {
+      let meanSpeed = tail.reduce(0.0) { $0 + simd_length($1.w) } / Double(tail.count)
+      braking = min(1,max(0,1 - meanSpeed / best))
+    }
+    let probableBackhand = label?.contains("反手") == true
     let impact = SwingImpact(power: power, sweep: sweep, serveIntentConfirmed: serving,
-                             label: label, probableBackhand: probableBackhand, approachLoad: axialLoad, verticalSweep: launchSweep, lateralSweep: lateral)
+                             label: label, probableBackhand: probableBackhand, approachLoad: axialLoad, verticalSweep: launchSweep, lateralSweep: lateral, braking: braking)
     return Hit(stroke: kind, aim: lateral, impact: impact, peakTime: pre[end].t,
                recognizedServe: recognized)
   }
