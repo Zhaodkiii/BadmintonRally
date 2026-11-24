@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>羽球动作 · 运行录像复盘</title>
+<style>
+:root{color-scheme:dark;font:16px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;background:#11191c;color:#e7eeed}*{box-sizing:border-box}body{max-width:1440px;margin:auto;padding:32px 4vw}h1{font-size:clamp(24px,4vw,42px);margin:0 0 18px}h2{font-size:20px;margin:25px 0 10px}p{margin:6px 0}select,button,a{font:inherit;color:inherit;border-radius:7px}button,select{padding:6px 12px;border:1px solid #496063;background:#233437}button{cursor:pointer}a{color:#8ce0d0}.bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:12px 0}label{display:flex;gap:6px;align-items:center}.pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{min-width:0;background:#182629;border:1px solid #35464a;border-radius:10px;overflow:hidden}.card p{padding:3px 12px}.sub{color:#acbeba;font-size:14px}video{display:block;width:100%;background:#080c0e;aspect-ratio:16/9}input[type=range]{accent-color:#72d7bf;min-width:140px;flex:1}.reference{max-width:760px}.time{font-variant-numeric:tabular-nums}details{margin:28px 0}summary{cursor:pointer}#reel{max-width:850px}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #82dac7}#status{color:#ffc878}.label{font-size:14px;color:#c8ddd7}@media(max-width:780px){body{padding:16px 3vw}.pair{grid-template-columns:1fr}.bar{gap:6px}}
+</style>
+<main><h1>羽球动作 · 运行录像复盘</h1>
+<div class="bar"><label>来球场景 <select id="scene"></select></label><label>目标回法 <select id="action"></select></label><button id="prev">上一项</button><button id="next">下一项</button></div>
+<h2 id="title"></h2><div class="pair">
+<article class="card"><p id="v0label"></p><video id="v0" muted playsinline preload="auto"></video><p id="t0" class="time sub"></p></article>
+<article class="card"><p id="v1label"></p><video id="v1" muted playsinline preload="auto"></video><p id="t1" class="time sub"></p></article>
+</div><div class="bar"><button id="play">播放对照</button><button id="back">上一帧</button><button id="forward">下一帧</button><button id="hit">定位击球</button><label>播放速度 <select id="speed"><option value="1">实速 1×</option><option value=".5">慢放 0.5×</option><option value=".25">慢放 0.25×</option></select></label><button id="restart">从头看</button></div>
+<div class="bar"><label for="slider">距按键帧</label><input id="slider" type="range" step="1"><output id="clock" class="time"></output></div><p id="status" role="status"></p>
+<section class="reference"><h2>比赛参考</h2><div class="bar"><label>片段 <select id="example"></select></label><span id="quality" class="sub"></span></div><video id="real" controls playsinline preload="metadata"></video><div class="bar"><button id="startReal">定位动作开始</button><button id="realPrev">上一帧</button><button id="realNext">下一帧</button><label>播放速度 <select id="realSpeed"><option value="1">实速 1×</option><option value=".5">慢放 0.5×</option><option value=".25">慢放 0.25×</option></select></label></div><p id="realTime" class="time sub"></p></section>
+<details id="compilation"><summary id="sum"></summary><div class="bar"><button id="jumpReel">跳到当前动作</button><a id="reelLink">打开合辑文件</a></div><video id="reel" controls playsinline preload="none"></video></details></main>
+<script>
+const data=/*DATA*/;
+const el=id=>document.getElementById(id);
+const games=[el('v0'),el('v1')], setText=(id,s)=>{el(id).textContent=s};
+let current,frames=0,gen=0,timer=0,playing=false;
+const option=(v,s)=>new Option(s,v);
+const allScenes=[...new Set(data.rows.map(r=>r.scene))];
+for(const s of allScenes)el('scene').add(option(s,s));
+setText('v0label',data.labels[0]);setText('v1label',data.labels[1]);setText('sum',data.labels[1]+'完整实速合辑');
+el('reelLink').href=data.reel;el('reel').src=data.reel;
+function pause(){playing=false;games.forEach(v=>v.pause());cancelAnimationFrame(timer);setText('play','播放对照')}
+function limit(v){return Math.max(+el('slider').min,Math.min(v,+el('slider').max))}
+function frameAt(i){const m=current.games[i];return Math.min(m.frames-1,Math.floor(games[i].currentTime*m.fps+1e-5))}
+function display(){
+ games.forEach((v,i)=>{let f=frameAt(i),m=current.games[i];setText('t'+i,'第 '+(f+1)+' / '+m.frames+' 帧 · '+(f===m.hit?'按键击球':(f>m.hit?'击球后 ':'击球前 ')+Math.abs(f-m.hit)+' 帧'))});
+ el('slider').value=String(frames);setText('clock',Math.round(frames/current.games[1].fps*1000)+' ms')
+}
+function seek(relative){
+ pause();frames=limit(Math.round(relative));current.games.forEach((m,i)=>{if(games[i].readyState>=1)games[i].currentTime=(m.hit+frames+.25)/m.fps});display()
+}
+function run(){
+ if(playing){pause();return}
+ if(games.some(v=>v.readyState<2)){setText('status','正在读取两段游戏录像');return}
+ if(frames>=+el('slider').max)seek(+el('slider').min);
+ const activeGen=gen;playing=true;setText('status','');setText('play','暂停');
+ games.forEach(v=>v.playbackRate=+el('speed').value);
+ Promise.all(games.map(v=>v.play())).then(()=>{
+  function tick(){
+   if(!playing||activeGen!==gen)return;
+   frames=frameAt(1)-current.games[1].hit;
+   const drift=frameAt(0)-current.games[0].hit-frames;
+   if(Math.abs(drift)>2 && !games[0].seeking)games[0].currentTime=(current.games[0].hit+frames+.25)/current.games[0].fps;
+   display();if(frames>=+el('slider').max||games.some(v=>v.ended)){pause();return}timer=requestAnimationFrame(tick)
+  }tick()
+ }).catch(()=>{if(activeGen===gen){pause();setText('status','视频未能开始播放，请重试。')}})
+}
+function openExample(){
+ const ref=current.refs[+el('example').value];const v=el('real');v.pause();v.src=ref.url;v.playbackRate=+el('realSpeed').value;
+ v.onloadedmetadata=()=>{v.currentTime=Math.max(0,ref.start-.28)};
+ setText('quality',ref.status+' · 片内动作 '+ref.start.toFixed(2)+'–'+ref.end.toFixed(2)+' 秒')
+}
+function realStep(delta){
+ const ref=current.refs[+el('example').value],v=el('real');if(v.readyState<1)return;v.pause();const f=Math.floor(v.currentTime*ref.fps+1e-5);
+ v.currentTime=(Math.min(ref.frames-1,Math.max(0,f+delta))+.25)/ref.fps
+}
+function scenes(name){
+ el('action').replaceChildren();for(const r of data.rows.filter(r=>r.scene===name))el('action').add(option(r.action,r.action))
+}
+function openAction(index){
+ gen++;pause();current=data.rows[index];el('scene').value=current.scene;scenes(current.scene);el('action').value=current.action;
+ setText('title',current.action);setText('status','');const ms=current.games;
+ el('slider').min=Math.max(...ms.map(m=>-m.hit));el('slider').max=Math.min(...ms.map(m=>m.frames-m.hit-1));frames=+el('slider').min;
+ games.forEach((v,i)=>{v.src=ms[i].url;v.playbackRate=+el('speed').value;v.onloadedmetadata=()=>{v.currentTime=(ms[i].hit+frames+.25)/ms[i].fps;display()};v.onseeked=display;v.onerror=()=>setText('status','未能读取游戏录像，请检查所在目录。')});
+ el('example').replaceChildren();current.refs.forEach((r,i)=>el('example').add(option(i,'片段 '+r.number)));openExample();display();
+}
+el('scene').onchange=()=>openAction(data.rows.findIndex(r=>r.scene===el('scene').value));
+el('action').onchange=()=>openAction(data.rows.findIndex(r=>r.action===el('action').value));
+el('prev').onclick=()=>openAction((data.rows.indexOf(current)-1+data.rows.length)%data.rows.length);
+el('next').onclick=()=>openAction((data.rows.indexOf(current)+1)%data.rows.length);
+el('play').onclick=run;el('back').onclick=()=>seek(frames-1);el('forward').onclick=()=>seek(frames+1);
+el('restart').onclick=()=>seek(+el('slider').min);el('hit').onclick=()=>seek(0);el('slider').oninput=e=>seek(+e.target.value);
+el('speed').onchange=e=>games.forEach(v=>v.playbackRate=+e.target.value);
+el('example').onchange=openExample;el('realSpeed').onchange=e=>el('real').playbackRate=+e.target.value;
+el('realPrev').onclick=()=>realStep(-1);el('realNext').onclick=()=>realStep(1);el('startReal').onclick=()=>{el('real').pause();el('real').currentTime=current.refs[+el('example').value].start};
+el('real').ontimeupdate=()=>setText('realTime','片内 '+el('real').currentTime.toFixed(3)+' 秒');
+el('jumpReel').onclick=()=>{const v=el('reel');if(v.readyState>=1)v.currentTime=current.reelStart;else{v.onloadedmetadata=()=>v.currentTime=current.reelStart;v.load()}};
+el('compilation').ontoggle=()=>{if(!el('compilation').open)el('reel').pause()};
+openAction(0);
+</script></html>

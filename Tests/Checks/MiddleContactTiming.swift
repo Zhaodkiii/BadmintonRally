@@ -14,7 +14,7 @@ import simd
     ("轻吊",.halfHigh,.drive,0.22,-0.15,0.22,0.26)
   ]
   static func main() {
-    print("回法,左手,偏移ms,识别,触球高度m,握点跳变cm,拍头误差cm,过网")
+    print("回法,左手,偏移ms,识别,触球高度m,握点跳变cm,拍头误差cm,过网,出球时间误差ms,出球位置误差mm,出射仰角度,出球初速mps,网顶余量m,距网终止深度m,横向终点m,最高m,全程秒")
     for trial in trials {
       for left in [false,true] {
         for ms in [-100,-50,0,50,100] { measure(trial, left:left, offset:ms) }
@@ -48,9 +48,30 @@ import simd
           court.update(game,reduced:false,left:left)
           let result = game.flight!
           let distance = simd_distance(previous,court.nearArmPoints()[1])
-          let fields = [t.name,String(left),String(offset),game.returnDescription(incoming:f,outgoing:result),
+          func metres(_ p: Position) -> SIMD3<Double> {
+            SIMD3(p.x*3.05,p.y*13.4,p.z*1.524/Flight.netHeight)
+          }
+          let delta = 0.001
+          let velocity = (metres(result.at(result.start+delta))-metres(result.from))/delta
+          let elevation = atan2(velocity.z,hypot(velocity.x,velocity.y))*180/Double.pi
+          let launchError = simd_distance(metres(f.at(game.now)),metres(result.at(result.start)))
+          var lo = result.start, hi = lo + result.duration
+          for _ in 0..<30 {
+            let mid = (lo+hi)/2
+            if result.at(mid).y > 0.5 { lo = mid } else { hi = mid }
+          }
+          let crossingTime = (lo+hi)/2
+          let clearance = metres(result.at(crossingTime)).z-1.524
+          precondition((clearance > 0) == (result.netCollision == nil))
+          let stopTime = result.netCollision == nil ? result.start + result.duration : crossingTime
+          let endpoint = result.at(stopTime)
+          let apex = (0...240).map { metres(result.at(result.start+(stopTime-result.start)*Double($0)/240)).z }.max()!
+          var fields = [t.name,String(left),String(offset),game.returnDescription(incoming:f,outgoing:result),
                         String(result.from.z*1.524/Flight.netHeight),String(distance*100),
                         String(court.nearRacketError(to:result.from)*100),String(result.netCollision == nil)]
+          fields += [String((result.start-game.now)*1000),String(launchError*1000),String(elevation),
+                     String(simd_length(velocity)),String(clearance),String((0.5-endpoint.y)*13.4),
+                     String(endpoint.x*3.05),String(apex),String(stopTime-result.start)]
           print(fields.joined(separator:","))
           return
         }

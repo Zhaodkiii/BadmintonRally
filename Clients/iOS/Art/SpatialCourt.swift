@@ -141,7 +141,7 @@ private final class CourtPlayer {
       }
       let lead = Float(hi-now)
       let target = world(intercept)-feet
-      let rearCourt = f.shot == .drive && abs(intercept.y-0.5) > 0.30
+      let rearCourt = abs(intercept.y-0.5) > 0.30
       let middleCourt = (0.15...0.30).contains(abs(intercept.y-0.5))
       tracksArrival = rearCourt || middleCourt
       let stillReachable = tracksArrival && now <= f.start+f.duration &&
@@ -151,7 +151,8 @@ private final class CourtPlayer {
         if tracksArrival {
           // Intercept anchors the feet. As the shuttle enters arm's reach,
           // prepare at its actual height and depth instead of the nominal point.
-          let ahead = min(1.0/30,Double(frameTime))*0.5
+          let anticipation = middleCourt ? 0.86 : 0.50
+          let ahead = min(1.0/30,Double(frameTime))*anticipation
           let arrival = now+Double(lead)
           preparationPoint = f.at(max(now+ahead,arrival-(middleCourt ? 0.10 : 0.09)))
         }
