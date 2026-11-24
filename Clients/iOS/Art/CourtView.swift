@@ -63,7 +63,8 @@ struct CourtView: View {
         let phase = min(1, max(0, elapsed / (motion == .smash ? 0.42 : 0.31)))
         let wave = sin(phase * Double.pi)
         let contactWeight = elapsed >= 0 ? max(0, 1 - elapsed / 0.13) : 0
-        let jump = motion == .smash && !(near && game.animationNeutral) ? 14 * wave : 0
+        let contactFlight = !supporting && game.flight?.incoming == !near ? game.flight : nil
+        let jump = reduced ? 0 : (contactFlight?.jumpHeightMeters ?? 0) * 35 * wave
         let dominantSide = near && leftHanded ? -1.0 : 1.0
         let moving = !supporting && game.phase == .flight && game.flight?.incoming == near
         let step = moving ? sin(game.now * 15) * 3 : 0

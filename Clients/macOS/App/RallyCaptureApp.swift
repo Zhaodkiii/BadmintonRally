@@ -25,6 +25,8 @@ struct StudioView: View {
   @State private var history = false
   @State private var pairing = false
   @State private var testingInbox = false
+  @State private var pointFolder: URL?
+  @State private var showingPoints = false
   @State private var manual = false
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -51,6 +53,10 @@ struct StudioView: View {
         }
         Button { history = true } label: { Label("采集历史", systemImage: "clock") }.disabled(host.busy)
         Menu("记录") {
+          Button("逐球复盘…") {
+            if let url = pickDirectory("选择比赛实时诊断下的场次目录") { pointFolder = url; showingPoints = true }
+          }
+          if let url = host.liveFile { Button("复盘最近比赛") { pointFolder = url; showingPoints = true } }
           Button("导入手机 CSV") {
             guard let root = host.root else { return }
             let panel = NSOpenPanel()
@@ -204,6 +210,7 @@ struct StudioView: View {
         }.padding(20).frame(width: 640, height: 440)
       }
       .onChange(of: cameraID) { _, id in host.cameraReady = false; UserDefaults.standard.set(id, forKey: "courtCamera") }
+      .sheet(isPresented: $showingPoints) { if let pointFolder { RallyPointReview(folder: pointFolder) } }
       .sheet(isPresented: $history) { CaptureHistory(root: host.root, close: { history = false }) }
       .sheet(isPresented: $pairing) {
         VStack(alignment: .leading, spacing: 14) {

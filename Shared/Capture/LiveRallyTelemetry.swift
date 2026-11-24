@@ -25,6 +25,18 @@ struct LiveRallyTelemetry: Codable {
     let from, to, position: [Double]
   }
 
+  struct Contact: Codable {
+    let trial: Int
+    let scenario, intendedReply, targetLane, targetDepth: String
+    let incoming: Flight
+    let ball, player, incomingVelocity: [Double]
+    let area: String
+    let heightAboveNetMeters, strength, vertical, lateral: Double
+    let beforeNet, outsideReach: Bool
+    let outgoing: Flight
+    var observedReply: String? = nil
+  }
+
   struct Event: Codable {
     let time: Double
     let kind: String
@@ -39,6 +51,7 @@ struct LiveRallyTelemetry: Codable {
     var curve: String? = nil
     var curveScore: Double? = nil
     var curveMargin: Double? = nil
+    var contact: Contact? = nil
   }
 
   struct Tick: Codable {

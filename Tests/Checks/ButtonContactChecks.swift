@@ -1,7 +1,70 @@
 import Foundation
 
 @main enum ButtonContactChecks {
+  static func checkReceivingScenes() {
+    for scene in CollectionScene.allCases where scene != .serve {
+      var game = Rally()
+      game.collectionScene = scene
+      game.readyToServe()
+      game.tick(0.91)
+      let feed = game.flight!
+      let contact = game.predictedIntercept!
+      precondition(feed.incoming && abs(contact.y - scene.feed!.receiveY) < 0.05)
+      if scene.area == .front {
+        precondition(game.opponentY <= 0.23 && feed.from.y == game.opponentY)
+        precondition(contact.y > 0.50 && contact.y < 0.65)
+        precondition(feed.jumpHeightMeters == 0)
+      }
+      if scene == .netHigh { precondition(contact.z > Flight.netHeight) }
+      if scene == .netLow { precondition(contact.z < Flight.netHeight) }
+      while game.flight!.at(game.now).y < contact.y { game.tick(0.005) }
+      for (stroke, power) in [(Stroke.drive, 0.18), (.smash, 0.85), (.lift, 0.85)] {
+        var copy = game
+        let impact = SwingImpact(power: power, sweep: power)
+        precondition(copy.swing(stroke, aim: 0.4, impact: impact, confirmedByButton: true) == .accepted)
+        let reply = copy.flight!
+        precondition(!reply.incoming && reply.to.x >= reply.from.x)
+        if scene == .netLow && stroke == .smash { precondition(reply.netCollision != nil) }
+        if scene == .high && stroke == .drive { precondition(reply.shot == .net && reply.netCollision == nil) }
+      }
+      game.tick(3)
+      game.readyToServe()
+      game.tick(0.91)
+      precondition(game.flight!.to.x == feed.to.x && game.flight!.to.y == feed.to.y)
+      game.sceneBlockSize = 1
+      game.readyToServe()
+      precondition(game.collectionScene != scene && game.collectionScene?.area == scene.area)
+    }
+  }
+
+  static func checkNetApproach() {
+    func reply(load: Double, height: Double, aim: Double) -> Flight {
+      var round = Rally()
+      round.phase = .flight
+      round.flight = Flight(from: .init(x: 0.34,y: 0.61,z: height),to: .init(x: 0.45,y: 0.70),
+                            start: 0,duration: 1,arc: 0.25,incoming: true,shot: .weak)
+      let impact = SwingImpact(power: 0.6,sweep: 0.6,approachLoad: load,verticalSweep: -0.10)
+      precondition(round.swing(.drive,aim: aim,impact: impact,confirmedByButton: true) == .accepted)
+      return round.flight!
+    }
+    let high = reply(load: -2.4,height: 0.44,aim: 0.8)
+    precondition(high.shot == .smash && high.netCollision == nil)
+    precondition(reply(load: -2.4,height: 0.30,aim: 0.8).netCollision != nil)
+    let push = reply(load: -0.6,height: 0.44,aim: 0.8)
+    precondition(push.shot == .drive && push.to.x < CourtFormat.singles.halfWidth)
+    precondition(reply(load: -0.6,height: 0.44,aim: 0.9).to.x > push.to.x)
+  }
+
   static func main() {
+    checkNetApproach()
+    let feet = Position(x: 0,y: 0.62)
+    let high = Position(x: 0,y: 0.58,z: 2.64 * Flight.netHeight / 1.524)
+    for shot in [Shot.net, .drive, .clear] {
+      precondition(Flight.attackingJump(shot: shot, contact: high, feet: feet, strength: 1) == 0)
+    }
+    precondition(Flight.attackingJump(shot: .smash, contact: high, feet: feet, strength: 0.9) > 0)
+    precondition(Flight.attackingJump(shot: .smash, contact: high, feet: Position(x:0.8,y:0.62), strength: 1) == 0)
+    checkReceivingScenes()
     var input = ButtonSwing()
     let tap = input.press(0, left: false, serving: true, bank: nil, intent: nil)
     var game = Rally()

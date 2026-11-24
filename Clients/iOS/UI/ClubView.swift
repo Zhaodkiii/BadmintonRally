@@ -21,13 +21,22 @@ struct ClubView: View {
   @State private var game = Rally()
   @State private var gamesToWin = 1
   @State private var format = CourtFormat.singles
+  @State private var lastServeReadout = ""
   @State private var repeatFeedback = ""
+  @State private var validating = false
+  @State private var validation = ServeValidation()
+  @State private var showValidationTrials = false
+  @State private var validationError = ""
   @State private var repeating = false
   @State private var serveTraining = ServeTraining.free
   @State private var targetLane = "自由"
   @State private var guidedServeTargets = true
   @State private var targetEffort = "自由"
   @State private var targetDepth = "自由"
+  @State private var area = CollectionArea.serve
+  @State private var receiveSide = "正手侧"
+  @State private var reply = "自由回球"
+  @State private var acrossAreas = false
   @State private var startingScene = CollectionScene.serve
   @State private var randomScenes = false
   @State private var sceneBlockSize = 10
@@ -168,6 +177,7 @@ struct ClubView: View {
   }
   func setup(_ practice: Bool, guided: Bool = false) {
     contactHint = ""
+    validating = false
     repeating = false
     lesson = guided
     training = practice
@@ -217,14 +227,44 @@ struct ClubView: View {
             )
             .font(.title3.bold())
             if repeating {
-              Picker("采集方式", selection: $randomScenes) {
-                Text("固定场景").tag(false)
-                Text("分组随机").tag(true)
-              }.pickerStyle(.segmented)
-              Picker(randomScenes ? "起始场景" : "本组场景", selection: $startingScene) {
-                ForEach(CollectionScene.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+              action("验证动作识别", "checkmark.circle") {
+                validating = true
+                startMatch()
               }
-              if startingScene == .serve || randomScenes {
+              Picker("接球区域", selection: $area) {
+                ForEach(CollectionArea.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+              }.pickerStyle(.segmented)
+                .onChange(of: area) { _, value in
+                  startingScene = value.scenes[0]
+                  reply = "自由回球"
+                }
+              if area != .serve {
+                Picker("采集方式", selection: $randomScenes) {
+                  Text("固定来球").tag(false)
+                  Text("分组随机").tag(true)
+                }.pickerStyle(.segmented)
+                if randomScenes { Toggle("跨网前、中场、后场随机", isOn: $acrossAreas) }
+                Picker(randomScenes ? "起始来球" : "本组来球", selection: $startingScene) {
+                  ForEach(area.scenes, id: \.self) { Text($0.rawValue).tag($0) }
+                }.onChange(of: startingScene) { _, _ in reply = "自由回球" }
+                if startingScene != .backhand || randomScenes {
+                  Picker("来球侧", selection: $receiveSide) {
+                    ForEach(["正手侧","反手侧","追身"], id: \.self) { Text($0) }
+                  }.pickerStyle(.segmented)
+                }
+                if !randomScenes {
+                  Picker("本组目标回法", selection: $reply) {
+                    ForEach(["自由回球"] + startingScene.replies, id: \.self) { Text($0) }
+                  }
+                }
+                Text("可尝试：" + startingScene.replies.joined(separator: "、")).font(.callout)
+                Picker("目标方向", selection: $targetLane) {
+                  ForEach(["自由","偏左","居中","偏右"], id: \.self) { Text($0) }
+                }.pickerStyle(.segmented)
+                Picker("目标深度", selection: $targetDepth) {
+                  ForEach(["自由","前场","中场","后场"], id: \.self) { Text($0) }
+                }.pickerStyle(.segmented)
+              } else {
                 Picker("发球专项", selection: $serveTraining) {
                   ForEach(ServeTraining.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
@@ -243,7 +283,7 @@ struct ClubView: View {
                   ForEach(["自由","前场","中场","后场"], id: \.self) { Text($0) }
                 }.pickerStyle(.segmented)
               }
-              if randomScenes {
+              if area != .serve && randomScenes {
                 Stepper("每组完成 \(sceneBlockSize) 球后换场景", value: $sceneBlockSize, in: 1...100)
               }
               Text(startingScene == .serve ? "按所选专项重复发球。左右以玩家面向球网为准，预期落点用于训练标注。" : "同组的来球和站位一致，每球可自由选择回法。")
@@ -279,7 +319,7 @@ struct ClubView: View {
             Text("挥拍时按音量＋或−确认击球。力度和挥向决定球路，静止按键会轻击。比赛使用后置相机，松键保存参考图。").font(.callout)
             if !contactHint.isEmpty { Text(contactHint).font(.caption) }
             HStack {
-              action("进入球场", "arrow.right") { startMatch() }
+              action("进入球场", "arrow.right") { validating = false; startMatch() }
               secondary("投屏说明") { page = .airplay }
             }
           case .airplay:
@@ -433,7 +473,7 @@ struct ClubView: View {
   }
   var matchHUD: some View {
     ZStack {
-      VStack {
+      if !validating { VStack {
           Spacer()
           Button {
             toggleNet()
@@ -444,16 +484,22 @@ struct ClubView: View {
           .accessibilityLabel("预选下一拍放网")
           .frame(maxWidth: .infinity)
           .frame(height: 120)
-      }
+      } }
       VStack {
         HStack(alignment: .top) {
           VStack(alignment: .leading) {
-            Text(repeating ? "场景采集" : lesson ? "挥拍入门" : training ? "自由练习" : "晚风球社 · 单打").font(.caption.bold())
+            Text(validating ? "发球识别验证" : repeating ? "场景采集" : lesson ? "挥拍入门" : training ? "自由练习" : "晚风球社 · 单打").font(.caption.bold())
             Text(contactReady ? "按 ＋ 或 − 击球 · 已按 \(contactCount) 次" : contactHint).font(.caption.monospacedDigit())
-            if repeating {
+            if validating {
+              Text("第 \(game.repetition) 球 · 自由发球")
+              if !validationError.isEmpty { Text(validationError) }
+            } else if repeating {
               Text("\(game.collectionScene?.rawValue ?? "") · 第 \(game.repetition) 球")
               if game.collectionScene == .serve { Text("\(game.serveTraining.rawValue) · 方向 \(game.serveGoal.lane) · 力度 \(game.serveGoal.effort) · 深度 \(game.targetDepth)").font(.caption) }
-              if randomScenes { Text("第 \(game.sceneGroup) 组 · 已完成 \(game.completedInGroup)/\(game.sceneBlockSize)").font(.caption) }
+              if let scene = game.collectionScene, scene != .serve {
+                Text("\(game.trialSide) · \(game.trialReply) · \(game.targetLane)／\(game.targetDepth)").font(.caption)
+              }
+              if game.sceneBlockSize > 0 { Text("第 \(game.sceneGroup) 组 · 已完成 \(game.completedInGroup)/\(game.sceneBlockSize)").font(.caption) }
               if !repeatFeedback.isEmpty { Text(repeatFeedback).font(.caption) }
               #if DEBUG
               Text(liveCapture.active && studio.linked ? "Mac 已连接" : "Mac 未实时接收").font(.caption)
@@ -470,7 +516,11 @@ struct ClubView: View {
             }
           }.padding(9).background(ink.opacity(0.88), in: RoundedRectangle(cornerRadius: 12))
           Spacer()
-          if repeating && game.phase == .serve && game.playerServes { secondary("重试本球") { replayPoint() } }
+          if repeating && !validating && game.phase == .serve && game.playerServes { secondary("重试本球") { replayPoint() } }
+          if !lastServeReadout.isEmpty {
+            Text(lastServeReadout).font(.headline).padding(8)
+              .background(ink.opacity(0.88), in: Capsule()).allowsHitTesting(false)
+          }
           secondary("暂停") { pause() }
         }
         Spacer()
@@ -478,9 +528,10 @@ struct ClubView: View {
           Text(hudMessage).bold().padding(7).background(
             game.hitWindowOpen ? Color.teal : ink.opacity(0.85), in: Capsule())
           Spacer()
-          secondary(game.armed ? "取消放网" : "预选放网") { toggleNet() }
+          if !validating { secondary(game.armed ? "取消放网" : "预选放网") { toggleNet() } }
         }.environment(\.layoutDirection, left ? .rightToLeft : .leftToRight)
       }.padding(8)
+
       if game.phase == .countdown || resumeAt > 0 {
         Text(
           "\(max(1,Int(ceil(resumeAt>0 ? resumeAt-ProcessInfo.processInfo.systemUptime : game.deadline-game.now))))"
@@ -488,6 +539,33 @@ struct ClubView: View {
       }
     }
   }
+  private func saveValidation() {
+    do { try validation.save(); validationError = "" }
+    catch { validationError = "验证记录保存失败 · " + error.localizedDescription }
+  }
+
+  private var validationResults: some View {
+    VStack(spacing: 4) {
+      Text("发球识别验证结果").font(.headline)
+      ForEach(ServeValidation.strokes + ["动作待定"], id: \.self) { stroke in
+        Text("\(stroke) · \(validation.trials.filter { $0.prediction == stroke }.count) 球")
+      }
+      Button("逐球记录 · 共 \(validation.trials.count) 球") { showValidationTrials = true }
+        .sheet(isPresented: $showValidationTrials) {
+          NavigationStack {
+            List(validation.trials, id: \.number) { trial in
+              VStack(alignment: .leading) {
+                Text("第 \(trial.number) 球 · \(trial.prediction)")
+                Text(trial.outcome ?? "本球未结束").font(.caption)
+              }
+            }.navigationTitle("发球验证逐球记录")
+              .toolbar { Button("完成") { showValidationTrials = false } }
+          }
+        }
+      if !validationError.isEmpty { Text(validationError) }
+    }
+  }
+
   var hudMessage: String {
     if game.waitingForDescent { return "高球 · 等下降" }
     if game.armed { return "下一拍放网" }
@@ -506,17 +584,17 @@ struct ClubView: View {
       if motion.interrupted { Text("继续比赛将重新连接传感器。") }
       HStack {
         action("继续比赛", "play.fill") { resume() }
-        secondary("重发本球") {
+        if !validating { secondary("重发本球") {
           replayPoint()
           resume()
-        }
+        } }
         secondary("结束本局") { finish() }
       }
     }
   }
   var resultCard: some View {
     VStack(spacing: 12) {
-      if repeating {
+      if validating { validationResults } else if repeating {
         Text("场景采集结束").font(.title.bold())
         Text("已完成 \(game.pointCount) 球")
       } else {
@@ -550,8 +628,12 @@ struct ClubView: View {
     case .authorized: break
     default: contactHint = "请在系统设置允许相机，以启用实体按键击球"; return
     }
+    if validating && left { contactHint = "验证使用右手模型，请先在设置切换为右手操作"; return }
+    validation = ServeValidation()
+    validationError = ""
     referenceGroup = UUID()
     repeatFeedback = ""
+    lastServeReadout = ""
     game = Rally()
     game.practice = training
     game.lessonEnabled = lesson
@@ -568,7 +650,20 @@ struct ClubView: View {
       game.guidedServeTargets = guidedServeTargets
       game.targetEffort = targetEffort
       game.collectionScene = startingScene
-      game.sceneBlockSize = randomScenes ? sceneBlockSize : 0
+      game.receiveSide = receiveSide
+      game.leftHanded = left
+      game.intendedReply = randomScenes ? "自由回球" : reply
+      game.randomAcrossAreas = acrossAreas
+      game.sceneBlockSize = startingScene != .serve && randomScenes ? sceneBlockSize : 0
+    }
+    if validating {
+      game.collectionScene = .serve
+      game.serveTraining = .free
+      game.sceneBlockSize = 0
+      game.guidedServeTargets = false
+      game.targetLane = "自由"
+      game.targetDepth = "自由"
+      game.targetEffort = "自由"
     }
     if !training { game.readyToServe() }
     motion.startButtonInput()
@@ -639,16 +734,56 @@ struct ClubView: View {
   private func confirmContact(_ sample: ButtonSwing.Hit, time: Double) {
     let kind = sample.stroke, aim = sample.aim, impact = sample.impact
     let before = game.feedback
+    let isServe = game.phase == .serve && game.playerServes
+    let incoming = game.flight
+    let inReach = game.hitWindowOpen
     let decision = game.swing(kind, aim: aim, impact: impact, confirmedByButton: true)
+    if validating && isServe && decision == .accepted {
+      validation.trials.append(.init(number: game.repetition, contactTime: time,
+        prediction: sample.recognizedServe ?? "动作待定"))
+      saveValidation()
+    }
+    if isServe && decision == .accepted {
+      lastServeReadout = "本次发球 · " + (sample.recognizedServe ?? "动作待定")
+    } else if decision == .accepted {
+      lastServeReadout = ""
+    }
     if repeating { repeatFeedback = "第 \(game.repetition) 球 · " + kind.rawValue + " · " + (decision == .accepted ? game.lastShot.rawValue : game.message) }
     #if DEBUG
     if liveCapture.active {
       let now = ProcessInfo.processInfo.systemUptime
+      if isServe && decision == .accepted {
+        liveCapture.add(.init(time: now, kind: "serveRecognition", text: sample.recognizedServe ?? "动作待定",
+          peakTime: time, gameTime: game.now))
+      }
       do {
         let detail = String(format: "%@ · 力度 %.4f · 动力 %.4f · 幅度 %.4f · 上下 %.4f · 左右 %.4f", impact.label ?? "按键挥拍", impact.strength, impact.power, impact.sweep, impact.verticalSweep, aim)
-        liveCapture.add(.init(time: now, kind: "impact", text: detail, peakTime: sample.peakTime, gameTime: game.now))
+        liveCapture.add(.init(time: now, kind: "impact", text: detail + (impact.approachLoad.map { String(format: " · 击球前轴向加速度 %+.3f g", $0) } ?? ""), peakTime: sample.peakTime, gameTime: game.now))
       }
       if decision == .accepted, let flight = game.flight, !flight.incoming {
+        if let incoming, incoming.incoming, let scene = game.collectionScene, scene != .serve {
+          let at = game.judgedContactTime ?? game.now
+          let ball = incoming.at(at)
+          let t0 = max(incoming.start, at - 0.005)
+          let t1 = min(incoming.start + incoming.duration, at + 0.005)
+          let a = incoming.at(t0), b = incoming.at(t1)
+          let dt = max(0.000001, t1-t0)
+          let velocity = t1 > t0 ? [(b.x-a.x)*3.05/dt,(b.y-a.y)*13.4/dt,(b.z-a.z)*1.524/Flight.netHeight/dt] : [0,0,0]
+          func snapshot(_ f: Flight) -> LiveRallyTelemetry.Flight {
+            .init(shot: f.shot.rawValue, incoming: f.incoming, start: f.start, duration: f.duration,
+                  arc: f.arc, from: f.from.coordinates, to: f.to.coordinates, position: f.at(at).coordinates)
+          }
+          let record = LiveRallyTelemetry.Contact(trial: game.repetition, scenario: scene.rawValue,
+            intendedReply: game.trialReply, targetLane: game.targetLane, targetDepth: game.targetDepth,
+            incoming: snapshot(incoming), ball: ball.coordinates, player: [game.playerX,game.playerY],
+            incomingVelocity: velocity, area: ball.contactArea,
+            heightAboveNetMeters: (ball.z-Flight.netHeight)*1.524/Flight.netHeight,
+            strength: impact.strength, vertical: impact.verticalSweep, lateral: aim,
+            beforeNet: ball.y < 0.5, outsideReach: !inReach, outgoing: snapshot(flight),
+            observedReply: game.returnDescription(incoming: incoming, outgoing: flight))
+          liveCapture.add(.init(time: time, kind: "receiveContact", text: ball.contactArea,
+                                gameTime: at, contact: record))
+        }
         let path = String(format: "%@ · 击球高度 %.3f · 目标深度 %.4f · 横向 %.4f · %@",
                           game.message, flight.from.z, flight.to.y, flight.to.x,
                           flight.netCollision == nil ? "预计过网" : "预计下网")
@@ -658,6 +793,7 @@ struct ClubView: View {
         peakTime: time, gameTime: game.now, judgedAt: game.judgedContactTime,
         accepted: decision == .accepted,
         candidateGame: kind.rawValue))
+      if repeating && decision == .accepted { flushLiveCapture(event: "contact") }
     }
     #endif
     if game.feedback != before {
@@ -680,6 +816,10 @@ struct ClubView: View {
     let previousFlight = game.flight?.start
     let points = game.pointCount
     game.tick(dt)
+    if validating && previousPhase != .point && game.phase == .point, let i = validation.trials.indices.last {
+      validation.trials[i].outcome = game.message
+      saveValidation()
+    }
     motion.serving = game.phase == .serve && game.playerServes
     motion.receiving = game.hitWindowOpen
     if game.pointCount != points { feedback.play("point", sound: sound, vibration: false) }
@@ -710,6 +850,7 @@ struct ClubView: View {
       .appendingPathComponent("比赛击球参考图").appendingPathComponent(referenceGroup.uuidString)
     contactInput.start(folder: folder) { time, button, photo in
       guard contactEpoch == epoch, page == .court else { return }
+      if validating && game.phase != .serve { return }
       contactCount += 1
       tick()
       guard page == .court else { return }
@@ -772,8 +913,16 @@ struct ClubView: View {
       score: game.score, playerX: game.playerX, playerY: game.playerY,
       opponentX: game.opponentX, opponentY: game.opponentY, flight: flight,
       hitWindowOpen: game.hitWindowOpen, displayOffset: game.offset, message: hudMessage,
-      input: "volumeButton", mode: game.collectionMode ?? (lesson ? "lesson" : training ? "practice" : "match"),
+      input: "volumeButton", mode: validating ? "识别验证/我方发球/\(game.repetition)/\(validation.id)/\(validation.model)" : game.collectionMode ?? (lesson ? "lesson" : training ? "practice" : "match"),
       difficulty: game.difficulty, leftHand: left, lightSwing: light, curveVersion: motion.curveVersion)
+    if repeating, event == "point", let end = game.landing {
+      let result = String(format: "%@ · %@ · x %.5f · y %.5f · z %.5f",
+                          state.mode, game.message, end.x, end.y, end.z)
+      liveCapture.add(.init(time: t, kind: "trialOutcome", text: result, gameTime: game.now))
+    }
+    if repeating, event == "phase", flight?.incoming == true {
+      liveCapture.add(.init(time: t, kind: "incomingFeed", text: state.mode, gameTime: game.now))
+    }
     if repeating, event == "start" || (event == "phase" && game.phase == .serve) || event == "point" || event == "replayPoint" || event == "finish" {
       liveCapture.add(.init(time: t, kind: "repeatTrial", text: state.mode + "/" + (event ?? ""),
                             gameTime: game.now))

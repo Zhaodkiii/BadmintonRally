@@ -23,15 +23,19 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		BA1100000000000000000010 /* PhoneNetwork.plist */ = {
+		BA1100000000000000000010 /* Exceptions for "Clients/iOS" folder in "BadmintonRally" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (Config/PhoneNetwork.plist,);
-			target = C30000000000000000000006;
+			membershipExceptions = (
+				Config/PhoneNetwork.plist,
+			);
+			target = C30000000000000000000006 /* BadmintonRally */;
 		};
-		CA7700000000000000000020 /* MacCapture.plist */ = {
+		CA7700000000000000000020 /* Exceptions for "Clients/macOS" folder in "RallyCapture" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (Config/MacCapture.plist,);
-			target = CA7700000000000000000008;
+			membershipExceptions = (
+				Config/MacCapture.plist,
+			);
+			target = CA7700000000000000000008 /* RallyCapture */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -43,7 +47,9 @@
 		};
 		C30000000000000000000002 /* Clients/iOS */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (BA1100000000000000000010 /* PhoneNetwork.plist */,);
+			exceptions = (
+				BA1100000000000000000010 /* Exceptions for "Clients/iOS" folder in "BadmintonRally" target */,
+			);
 			path = Clients/iOS;
 			sourceTree = "<group>";
 		};
@@ -54,7 +60,9 @@
 		};
 		CA7700000000000000000002 /* Clients/macOS */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (CA7700000000000000000020 /* MacCapture.plist */,);
+			exceptions = (
+				CA7700000000000000000020 /* Exceptions for "Clients/macOS" folder in "RallyCapture" target */,
+			);
 			path = Clients/macOS;
 			sourceTree = "<group>";
 		};

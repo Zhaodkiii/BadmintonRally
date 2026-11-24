@@ -53,10 +53,21 @@ struct Position {
   var y: Double
   var z: Double = 0
 }
+extension Position {
+  var contactArea: String {
+    if y < 0.5 { return "对方半场" }
+    if y <= 0.65 { return "网前" }
+    return y < 0.80 ? "中场" : "后场"
+  }
+  var coordinates: [Double] { [x,y,z] }
+}
+
 struct SwingImpact {
   let power, sweep: Double
   var serveIntentConfirmed = false
   var label: String?
+  var probableBackhand = false
+  var approachLoad: Double? = nil
   var verticalSweep: Double = 0
   var lateralSweep: Double = 0
   var followThrough: Double = 0
@@ -70,6 +81,15 @@ struct Flight {
   let shot: Shot
   var measured = false
   var invitesAttack = false
+  var jumpHeightMeters = 0.0
+  static func attackingJump(shot: Shot, contact: Position, feet: Position, strength: Double) -> Double {
+    guard shot == .smash || shot == .power, strength >= 0.5,
+          (contact.y - 0.5) * (feet.y - 0.5) > 0,
+          hypot((contact.x-feet.x)*3.05, (contact.y-feet.y)*13.4) <= 1.12 else { return 0 }
+    let height = contact.z * 1.524 / netHeight
+    guard height > 2.32, height <= 2.9 else { return 0 }
+    return min(0.40, (height - 2.32) * 0.8)
+  }
   static let netHeight = 0.31
 
   static func arch(_ u: Double, shot: Shot) -> Double {
@@ -134,16 +154,55 @@ enum ServeTraining: String, CaseIterable {
   case backhandShort = "反手短发球", flick = "反手偷后场"
 }
 
-enum CollectionScene: String, CaseIterable {
-  case serve = "我方发球", high = "后场高球", net = "网前来球", flat = "中场平球", defense = "接杀防守"
+enum CollectionArea: String, CaseIterable {
+  case serve = "我方发球", front = "网前", middle = "中场", back = "后场"
 
-  var feed: Shot? {
+  var scenes: [CollectionScene] { CollectionScene.allCases.filter { $0.area == self } }
+}
+
+enum CollectionScene: String, CaseIterable {
+  case serve = "我方发球", netHigh = "网前高点机会球", netSlow = "贴网慢球", netLow = "网前低点下落球"
+  case flat = "身体侧面平快球", defense = "接杀防守", halfHigh = "半场高球"
+  case high = "后场到位高球", deepDrive = "平快压底线", backhand = "反手底角深球"
+
+  var area: CollectionArea {
+    switch self {
+    case .serve: .serve
+    case .netHigh, .netSlow, .netLow: .front
+    case .flat, .defense, .halfHigh: .middle
+    case .high, .deepDrive, .backhand: .back
+    }
+  }
+
+  var replies: [String] {
+    switch self {
+    case .serve: []
+    case .netHigh: ["扑球","推球","轻放网"]
+    case .netSlow: ["放直线","勾对角","推空当"]
+    case .netLow: ["挑直线","挑对角","轻托回网"]
+    case .flat: ["平抽","减力挡网"]
+    case .defense: ["接杀挡网","接杀挑高","接杀反抽"]
+    case .halfHigh: ["点杀","下压突击","轻吊"]
+    case .high: ["高远球","吊球","扣杀"]
+    case .deepDrive: ["平高球","被动高远球","过渡吊球"]
+    case .backhand: ["反手高远","反手吊球","头顶正手处理"]
+    }
+  }
+
+  // Normalized longitudinal coordinates run from the far baseline (0) to the near baseline (1).
+  typealias Feed = (shot: Shot, originY: Double, height: Double, depth: Double, arc: Double, seconds: Double, receiveY: Double)
+  var feed: Feed? {
     switch self {
     case .serve: nil
-    case .high: .clear
-    case .net: .net
-    case .flat: .drive
-    case .defense: .power
+    case .netHigh: (.weak, 0.18, 0.45, 0.69, 0.39, 1.40, 0.57)
+    case .netSlow: (.net, 0.18, 0.43, 0.63, 0.31, 1.38, 0.54)
+    case .netLow: (.net, 0.18, 0.42, 0.65, 0.25, 1.28, 0.59)
+    case .flat: (.drive, 0.20, 0.33, 0.89, 0.15, 0.90, 0.73)
+    case .defense: (.smash, 0.13, 0.59, 0.85, 0.09, 0.80, 0.70)
+    case .halfHigh: (.weak, 0.25, 0.35, 0.87, 0.38, 1.28, 0.71)
+    case .high: (.clear, 0.15, 0.46, 0.97, 0.78, 1.90, 0.85)
+    case .deepDrive: (.drive, 0.19, 0.40, 0.98, 0.26, 1.12, 0.86)
+    case .backhand: (.clear, 0.14, 0.42, 0.98, 0.63, 1.65, 0.87)
     }
   }
 }
@@ -173,9 +232,12 @@ struct Rally {
     phase = .serve
     serveOpened = now
     if collectionScene != nil {
-      if sceneBlockSize > 0 && completedInGroup >= sceneBlockSize {
+      if collectionScene != .serve && sceneBlockSize > 0 && completedInGroup >= sceneBlockSize {
         if remainingScenes.isEmpty {
-          remainingScenes = CollectionScene.allCases.filter { $0 != collectionScene }.shuffled()
+          let candidates = CollectionScene.allCases.filter {
+            $0 != .serve && $0 != collectionScene && (randomAcrossAreas || $0.area == collectionScene?.area)
+          }
+          remainingScenes = candidates.shuffled()
         }
         collectionScene = remainingScenes.removeLast()
         sceneGroup += 1
@@ -196,10 +258,23 @@ struct Rally {
       targetY = playerY
       rivalY = opponentY
     }
+    if let feed = collectionScene?.feed {
+      playerX = 0
+      playerY = min(0.96, feed.receiveY + 0.09)
+      opponentY = feed.originY
+      targetX = playerX; targetY = playerY
+      rivalTarget = opponentX; rivalY = opponentY
+    }
     message = servicePrompt
     nextAI = now + 0.9
   }
   var collectionScene: CollectionScene?
+  var randomAcrossAreas = false
+  var receiveSide = "正手侧"
+  var leftHanded = false
+  var intendedReply = "自由回球"
+  var trialReply: String { collectionScene?.replies.contains(intendedReply) == true ? intendedReply : "自由回球" }
+  var trialSide: String { collectionScene == .backhand ? "反手侧" : receiveSide }
   var serveTraining = ServeTraining.free
   var targetLane = "自由"
   var targetDepth = "自由"
@@ -220,6 +295,7 @@ struct Rally {
     guard let scene = collectionScene else { return nil }
     var fields = ["场景采集",scene.rawValue,String(repetition),String(sceneGroup),String(sceneBlockSize)]
     if scene == .serve { fields += [serveTraining.rawValue, serveGoal.lane, targetDepth, serveGoal.effort] }
+    if scene != .serve { fields += [scene.area.rawValue, trialSide, trialReply, targetLane, targetDepth] }
     return fields.joined(separator: "/")
   }
   private(set) var repetition = 0
@@ -376,7 +452,7 @@ struct Rally {
       guard playerServes else { return .invalidServe }
       let serveLabel = impact?.label
       let longServe = serveLabel == "反手偷后场" || serveLabel == "正手高远发球"
-      let shortServe = serveLabel == "反手短发" || serveLabel == "正手短发球"
+      let shortServe = serveLabel == "反手短发球" || serveLabel == "反手短发" || serveLabel == "正手短发球"
       guard longServe || shortServe || neutral || impact?.serveIntentConfirmed == true || kind != .smash else {
         message = "从腰前向前轻推或上挑发球"
         return .invalidServe
@@ -424,12 +500,24 @@ struct Rally {
     lockUntil = now + 0.18
     let stretch = confirmedByButton ? 0 : max(dx / 0.52, dy / 0.35)
     let front = ball.y < 0.78 && ball.y <= y + 0.035
-    let shortCourt = front && ball.y < 0.75
+    let shortCourt = confirmedByButton ? (0.5...0.69).contains(ball.y) : front && ball.y < 0.75
     let strength = min(1, max(0, impact?.strength ?? 0.55))
     let softLift = !neutral && kind == .lift && impact != nil && strength < 0.35
-    let downward = !neutral && (kind == .smash || impact?.label == "网前扑球")
+    // Net interception: distinguish a turning phone from sustained downward drive.
+    // The signed load is the mean gravity-axis projection over the last 150 ms (g).
+    let netLoad = confirmedByButton && shortCourt ? impact?.approachLoad : nil
+    let pressingDown = (netLoad ?? 0) < -1.65 && (impact?.verticalSweep ?? 0) < 0.18 && strength > 0.38
+    let forwardPush = (netLoad ?? 0) < -0.30 && (impact?.verticalSweep ?? 0) < 0.55 && strength > 0.19
+    let downward = pressingDown || !neutral && (kind == .smash || impact?.label == "网前扑球")
     let shot: Shot
     if armed || (confirmedByButton && strength < 0.04) {
+      shot = .net
+    } else if pressingDown {
+      shot = .smash
+    } else if forwardPush && !downward && ball.z >= Flight.netHeight && kind != .smash {
+      shot = .drive
+    } else if confirmedByButton, let impact, impact.label == nil,
+              strength < 0.32, !downward || ball.z >= Flight.netHeight, kind != .lift || ball.z >= Flight.netHeight {
       shot = .net
     } else if shortCourt && downward {
       shot = .smash
@@ -449,7 +537,8 @@ struct Rally {
     hits += 1
     returns += 1
     longest = max(longest, hits)
-    send(shot, aim: aim, from: ball, impact: impact, netPlay: shortCourt, stretch: stretch)
+    send(shot, aim: aim, from: ball, impact: impact, netPlay: shortCourt, stretch: stretch, defendingSmash: f.shot == .smash || f.shot == .power, button: confirmedByButton)
+    flight?.jumpHeightMeters = Flight.attackingJump(shot: shot, contact: ball, feet: Position(x: x,y: y), strength: strength)
     if let step = lesson, flight?.netCollision == nil {
       if step.accepts(shot) {
         lessonIndex += 1
@@ -488,7 +577,26 @@ struct Rally {
     }
   }
 
-  private mutating func send(_ shot: Shot, aim: Double, from: Position, impact: SwingImpact?, netPlay: Bool, stretch: Double) {
+  func returnDescription(incoming: Flight, outgoing: Flight) -> String {
+    let p = outgoing.from
+    let crossed = p.x * outgoing.to.x < 0 && abs(p.x - outgoing.to.x) > 0.4
+    let attack = incoming.shot == .smash || incoming.shot == .power
+    switch (p.contactArea, outgoing.shot) {
+    case ("网前", .net): return crossed ? "勾对角" : "轻放网"
+    case ("网前", .drive): return "推球"
+    case ("网前", .clear): return crossed ? "挑对角" : "挑直线"
+    case ("网前", .smash), ("网前", .power): return p.z > Flight.netHeight ? "扑球" : "低点下压"
+    case ("中场", .drive): return attack ? "接杀反抽" : "平抽"
+    case ("中场", .net): return attack ? "接杀挡网" : (p.z > Flight.netHeight ? "轻吊" : "减力挡网")
+    case ("中场", .clear) where attack: return "接杀挑高"
+    case ("中场", .smash), ("中场", .power): return "下压突击"
+    case ("后场", .net): return "吊球"
+    case ("后场", .drive): return "平快回球"
+    default: return outgoing.shot.rawValue
+    }
+  }
+
+  private mutating func send(_ shot: Shot, aim: Double, from: Position, impact: SwingImpact?, netPlay: Bool, stretch: Double, defendingSmash: Bool, button: Bool) {
     phase = .flight
     armedUntil = -1
     feedback += 1
@@ -524,7 +632,20 @@ struct Rally {
       default: break
       }
     }
+    if let impact, from.contactArea == "后场", shot == .net {
+      // A rear-court drop still travels the length of the court before falling short.
+      far.y = 0.40 - 0.11 * impact.strength
+      speed = 1.13 - 0.20 * impact.strength
+      let crossing = (0.5 - from.y) / (far.y - from.y)
+      if crossing > 0 && crossing < 1 {
+        arc = max(arc, (Flight.netHeight + 0.045 - from.z * (1 - crossing)) / Flight.arch(crossing, shot: shot))
+      }
+    }
+    if defendingSmash, shot == .drive, impact?.label != "接杀反抽" {
+      speed *= 0.90
+    }
     if netPlay {
+      let baseline = (far.y, speed, arc)
       let effort = min(1, max(0, impact?.strength ?? 0.55))
       let extensionLoss = min(1, max(0, (stretch - 0.65) / 0.35))
       let effective = effort * (1 - 0.55 * extensionLoss)
@@ -533,7 +654,9 @@ struct Rally {
       switch shot {
       case .smash, .power:
         far.y = 0.34 - 0.12 * effective
-        crossingHeight = from.z * (1 - (from.y - 0.5) / (from.y - far.y))
+        let metresToNet = max(0, (from.y - 0.5) * 13.4)
+        let descent = 0.075 + 0.16 * abs(min(0, impact?.verticalSweep ?? 0)) + 0.035 * effective
+        crossingHeight = from.z - metresToNet * descent * Flight.netHeight / 1.524
         speed = 0.70 - 0.22 * effective
         message = from.z > Flight.netHeight ? "网前下压" : "低点击球 · 下压"
       case .net:
@@ -550,6 +673,20 @@ struct Rally {
       }
       let u = (from.y - 0.5) / (from.y - far.y)
       if u > 0 && u < 1 { arc = min(0.95, (crossingHeight - from.z * (1 - u)) / Flight.arch(u, shot: shot)) }
+      if button {
+        let blend = min(1, max(0, (0.69 - from.y) / 0.065))
+        far.y = baseline.0 + blend * (far.y - baseline.0)
+        speed = baseline.1 + blend * (speed - baseline.1)
+        arc = baseline.2 + blend * (arc - baseline.2)
+      }
+    }
+    if button {
+      // Heading is relative to a straight shot from the contact, in court metres.
+      let angle = min(1,max(-1,aim)) * 0.55
+      let displacement = abs(from.y-far.y)*13.4*tan(angle)/3.05
+      let room = max(0.001, format.halfWidth - (displacement >= 0 ? from.x : -from.x))
+      far.x = netPlay ? from.x + room * tanh(displacement / room)
+        : min(format.halfWidth,max(-format.halfWidth, from.x + displacement))
     }
     if let impact { arc *= 1 + 0.30 * impact.verticalSweep }
     if (shot == .smash || shot == .power) && from.z <= Flight.netHeight {
@@ -598,7 +735,7 @@ struct Rally {
       let loft = lift * impact.strength
       arc = 0.21 + 0.20 * impact.strength + loft * (0.02 + 0.36 * impact.strength)
       duration = (1.05 + 0.60 * loft) * (1.12 - 0.24 * impact.strength)
-      shot = loft >= 0.5 ? .clear : .net
+      shot = !short && loft >= 0.40 ? .clear : .net
     }
     if let high = measuredHigh {
       // Carry comes from stroke energy; a larger sweep adds loft and hang time.
@@ -628,13 +765,16 @@ struct Rally {
   }
 
   private mutating func feed() {
-    if let shot = collectionScene?.feed {
-      let nearNet = shot == .net
-      let from = Position(x: opponentX, y: opponentY, z: shot == .power ? 0.53 : 0.31)
-      let to = Position(x: 0.27, y: nearNet ? 0.68 : shot == .drive ? 0.80 : 0.91)
-      flight = Flight(from: from, to: to, start: now,
-                      duration: shot == .power ? 0.83 : shot == .drive ? 1.03 : 1.38,
-                      arc: shot == .clear ? 0.58 : 0.24, incoming: true, shot: shot)
+    if let recipe = collectionScene?.feed {
+      let width = collectionScene == .backhand ? 0.79 : 0.49
+      let side = trialSide == "追身" ? 0 : trialSide == "反手侧" ? -width : width
+      flight = Flight(from: Position(x: opponentX, y: opponentY, z: recipe.height),
+                      to: Position(x: leftHanded ? -side : side, y: recipe.depth),
+                      start: now, duration: recipe.seconds, arc: recipe.arc, incoming: true, shot: recipe.shot)
+      if let feed = flight {
+        flight?.jumpHeightMeters = Flight.attackingJump(shot: feed.shot, contact: feed.from,
+          feet: Position(x: opponentX,y: opponentY), strength: 1)
+      }
       phase = .flight
       rivalSwing = now
       approachIncoming()
@@ -656,8 +796,12 @@ struct Rally {
     let to = Position(x: lessonEnabled || repeatNet ? 0 : destination, y: shot == .net ? 0.67 : 0.91)
     let duration = (shot == .power ? 0.83 : shot == .drive ? 1.03 : 1.38) * (practice ? 1.23 : 1.0)
     flight = Flight(
-      from: repeatNet ? Position(x: 0, y: 0.29, z: 0.35) : origin, to: to, start: now, duration: duration,
+      from: repeatNet ? Position(x: opponentX, y: opponentY, z: 0.43) : origin, to: to, start: now, duration: duration,
       arc: shot == .clear || shot == .weak ? 0.58 : 0.24, incoming: true, shot: shot)
+    if let feed = flight {
+      flight?.jumpHeightMeters = Flight.attackingJump(shot: feed.shot, contact: feed.from,
+        feet: Position(x: opponentX,y: opponentY), strength: 1)
+    }
     phase = .flight
     rivalSwing = now
     if practice { targetX = to.x; targetY = to.y; predictedIntercept = flight?.at(now + duration * 0.75) } else { approachIncoming() }
@@ -685,7 +829,8 @@ struct Rally {
       guard height <= Self.overheadLimit else { continue }
       let y = min(0.98, max(0.54, ball.y + 0.045))
       let travel = max(abs(ball.x-playerX)/1.75, abs(y-playerY)/0.75)
-      let score = abs(height-preferredHeight) + 6*max(0,now+travel+0.20-t)
+      let positionCost = collectionScene?.feed.map { 45 * abs(ball.y - $0.receiveY) } ?? abs(height-preferredHeight)
+      let score = positionCost + 6*max(0,now+travel+0.20-t)
         + 1.2*abs(flight.to.y-ball.y)
       if score < bestScore { bestScore = score; intercept = ball; interceptAt = t }
     }

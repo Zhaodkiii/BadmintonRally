@@ -74,8 +74,6 @@ private final class CourtPlayer {
       link(weft,V(-span,0,offset),V(span,0,offset))
     }
   }
-  private var jumpStart = -Double.infinity
-  private var jumpedFlight: Double?
   func pose(_ feet: V, side: Float, facing: Float, now: Double, elapsed: Double,
             stroke: Stroke, impact: SwingImpact?, incoming: Flight?, outgoing: Flight?, still: Bool) {
     let delta = feet - (previous ?? feet)
@@ -89,21 +87,16 @@ private final class CourtPlayer {
       if soon.z*facing > -0.15, groundDistance < 1.45,
          now + 0.18 <= incoming.start + incoming.duration {
         readyHeight = soon.y
-        if soon.y > 2.1, soon.y < 2.85, groundDistance < 1.12,
-           jumpedFlight != incoming.start, now - jumpStart > 0.65 {
-          jumpStart = now
-          jumpedFlight = incoming.start
-        }
       }
     }
-    if now < jumpStart { jumpStart = -.infinity; jumpedFlight = nil }
-    let age = Float(now - jumpStart)
-    let airborne = min(1,max(0,(age-0.08)/0.43))
-    let lift = 0.44 * 4 * airborne * (1-airborne)
+    let age = Float(now - (outgoing?.start ?? -.infinity))
+    let amplitude: Float = still ? 0 : Float(outgoing?.jumpHeightMeters ?? 0)
+    let airborne = min(1,max(0,age/0.36))
+    let lift = amplitude * 4 * airborne * (1-airborne)
     let crouch: Float
-    if (0..<0.08).contains(age) { crouch = 0.10*sin(.pi*age/0.08) }
-    else if (0.51..<0.68).contains(age) { crouch = 0.12*sin(.pi*(age-0.51)/0.17) }
-    else { crouch = 0 }
+    if amplitude > 0, (0.36..<0.50).contains(age) {
+      crouch = amplitude * 0.26 * sin(.pi*(age-0.36)/0.14)
+    } else { crouch = 0 }
     groundShadow?.simdPosition = feet + V(0,0.012,0)
     root.simdPosition = feet + V(0,lift,0)
     let step = distance > 0.0001 && !still ? sin(stridePhase)*0.22 : 0
@@ -114,7 +107,9 @@ private final class CourtPlayer {
     let active = clock >= 0 && clock < 0.54
     let high = confirmed ? world(outgoing!.from).y > 1.95 : readyHeight > 1.95 || lift > 0
     let low = confirmed ? world(outgoing!.from).y < 1.05 : readyHeight > 0 && readyHeight < 1.05
-    let lunge = low && active ? 0.19*sin(.pi*min(1,clock/0.54)) : 0
+    let atNet = confirmed && abs(outgoing!.from.y - 0.5) <= 0.15
+    let reachDip: Float = low ? 0.21 : atNet && amplitude == 0 ? 0.09 : 0
+    let lunge = active ? reachDip * sin(.pi*min(1,clock/0.54)) : 0
     let dip = crouch + lunge
     for i in 0..<2 {
       let sign: Float = i == 0 ? -1 : 1
@@ -128,12 +123,32 @@ private final class CourtPlayer {
     torso.simdEulerAngles.y = turn
     let shoulder = V(side*0.20*cos(turn),1.37-dip,-side*0.20*sin(turn))
     let guardPose = V(side*0.49,1.34-dip,facing*0.38)
-    let backhand = impact?.label?.contains("反手") == true || impact?.label == "接杀反抽"
+    let backhand = impact?.probableBackhand == true || impact?.label?.contains("反手") == true || impact?.label == "接杀反抽"
     let swingSide = backhand ? -side : side
-    let back = V(swingSide*(high ? 0.47 : 0.80),high ? 1.98 : low || stroke == .lift ? 0.75 : 1.30,-facing*0.32)
+    var back = V(swingSide*(high ? 0.47 : 0.80),high ? 1.98 : low || stroke == .lift ? 0.75 : 1.30,-facing*0.32)
     var strike = V(swingSide*0.38,high ? 2.05 : low ? 0.72 : 1.38,facing*0.83)
     if confirmed { strike = world(outgoing!.from)-root.simdPosition }
-    let finish = V(-swingSide*(high ? 0.51 : 0.26),high || stroke == .smash ? 0.91 : stroke == .lift ? 1.87 : 1.45,facing*0.50)
+    var finish = V(-swingSide*(high ? 0.51 : 0.26),high || stroke == .smash ? 0.91 : stroke == .lift ? 1.87 : 1.45,facing*0.50)
+    if atNet, amplitude == 0 {
+      back = guardPose + V(-0.08*swingSide,low ? -0.35 : 0.08,-0.12*facing)
+      let followY: Float = outgoing?.shot == .clear ? 0.48 : stroke == .smash ? -0.28 : 0.06
+      finish = strike + V(-0.12*swingSide,followY,0.15*facing)
+    }
+    if let name = impact?.label, let style = ServeTraining(rawValue: name), style != .free {
+      switch style {
+      case .forehandHigh:
+        back = V(side*0.65, 0.64, -facing*0.42)
+        finish = V(-side*0.34, 1.83, facing*0.47)
+      case .forehandShort:
+        back = V(side*0.43, 0.86, facing*0.21)
+        finish = strike + V(-side*0.08, 0.14, facing*0.20)
+      case .backhandShort, .flick:
+        back = V(-side*0.19, 0.96, facing*0.37)
+        finish = strike + V(side*0.10, style == .flick ? 0.49 : 0.10,
+                            facing*(style == .flick ? 0.38 : 0.16))
+      case .free: break
+      }
+    }
     func blend(_ a: V, _ b: V, _ raw: Float) -> V {
       let t = max(0,min(1,raw))
       return a+(b-a)*(t*t*(3-2*t))
