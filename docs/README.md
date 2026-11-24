@@ -1,8 +1,17 @@
 # 晚风球社 · BadmintonRally
 
+## 项目入口
+
+- [code](../code/) 存放 iPhone 游戏、Mac 采集端、共享模块、测试和训练工具。用 [Xcode 工程](../code/BadmintonRally.xcodeproj) 开发，在 `code/` 下运行构建和训练命令。
+- [docs](./) 存放[产品需求](产品需求/)和[技术方案](技术方案/)。
+- [assets](../assets/) 存放[角色与球馆设计](../assets/美术/)、[比赛画面构图](../assets/参考素材/美术参考/)和[参考项目与录屏](../assets/参考/)。
+- [data](../data/) 存放[真人与实战采集](../data/动作采集/)、[比赛录像](../data/羽毛球比赛视频/)、[训练和逐轮验收](../data/羽球比赛训练/)及开发录屏。此目录为本机资料，不随 Git 提交。
+
+采集、训练和录像复盘统一使用项目内路径。对应关系见[目录迁移清单](目录迁移清单.md)。
+
 iPhone 横屏羽毛球单打。玩家握手机朝电视挥拍，角色自动跑位。应用支持通过系统屏幕镜像投屏，也提供独立的触屏玩法。当前可玩版本使用 SwiftUI Canvas 实时绘制球场、人物、球拍和球路。
 
-Mac 客户端仅用于开发采集：同步整理 iPhone 运动数据和现场录像，供后续离线训练使用。正式游戏在 iPhone 上独立运行。数据归档格式、标注及交接要求见[《Mac 动作采集工作台需求》](docs/产品需求/Mac动作采集工作台需求.md)。
+Mac 客户端仅用于开发采集：同步整理 iPhone 运动数据和现场录像，供后续离线训练使用。正式游戏在 iPhone 上独立运行。数据归档格式、标注及交接要求见[《Mac 动作采集工作台需求》](产品需求/Mac动作采集工作台需求.md)。
 
 ## Mac 开发采集怎么用
 
@@ -55,7 +64,7 @@ Mac 顶部点「采集历史」自动打开当前采集目录。可搜索参与�
 | Tools | 本地训练、回放和数据分析工具 |
 | Tests/Checks、Tests/UI | 独立规则检查与 Xcode 界面测试 |
 | docs/参考素材/美术参考 | 原创场馆与角色构图 |
-| [羽毛球体感游戏需求文档](docs/产品需求/羽毛球体感游戏需求文档.md) | 完整设计、动画指导和后续真机验收目标 |
+| [羽毛球体感游戏需求文档](产品需求/羽毛球体感游戏需求文档.md) | 完整设计、动画指导和后续真机验收目标 |
 
 ## 采集、训练与接入
 
@@ -106,16 +115,16 @@ swiftc Clients/iOS/Game/Rally.swift Tests/Checks/RulesChecks.swift -o /tmp/badmi
 
 ## 开源许可证
 
-本项目采用 [MIT 许可证](LICENSE)。
+本项目采用 [MIT 许可证](../code/LICENSE)。
 
 ### 用实测挥拍回放比赛识别器
 
 在项目目录运行下面的命令。将最后的比赛目录换成要复查的场次，可多次传入 `--match`。回放按手机采样顺序调用比赛用的 Swift 识别器，并用当时最近一条比赛状态还原接球窗口。默认采用右手无校准进行专项回放；比赛回放读取左右手和轻挥设置，可用 `--match-profile` 提供当时保存的个人校准 JSON。比赛状态采样之间的切换时间是近似值。
 
 ```sh
-python3 Tools/replay_court.py "$HOME/Downloads/动作采集" \
-  "$HOME/Downloads/动作采集分析/本地训练台/20261123-072858-687220/examples.json" \
-  --match "$HOME/Downloads/动作采集/比赛实时诊断/6743DC40-5F69-4C8F-857E-4DC6B6FE9A35/分析" \
+python3 Tools/replay_court.py "$HOME/Documents/project/BadmintonRally/data/动作采集" \
+  "$HOME/Documents/project/BadmintonRally/data/动作采集分析/本地训练台/20261123-072858-687220/examples.json" \
+  --match "$HOME/Documents/project/BadmintonRally/data/动作采集/比赛实时诊断/6743DC40-5F69-4C8F-857E-4DC6B6FE9A35/分析" \
   --output /tmp/挥拍回放.json
 ```
 

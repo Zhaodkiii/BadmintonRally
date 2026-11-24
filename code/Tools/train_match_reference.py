@@ -27,7 +27,7 @@ def progress(t, drag):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('folder', nargs='?', type=Path, default=Path.home()/'Downloads/羽球比赛训练')
+    parser.add_argument('folder', nargs='?', type=Path, default=Path(__file__).resolve().parents[2] / 'data/羽球比赛训练')
     root = parser.parse_args().folder
     media = root/'素材'
     media.mkdir(parents=True, exist_ok=True)

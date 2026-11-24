@@ -132,7 +132,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--before",type=Path,required=True)
     ap.add_argument("--after",type=Path,required=True)
-    ap.add_argument("--index",type=Path,default=Path.home()/'Downloads/羽毛球比赛视频/接球动作片段精选/片段索引.json')
+    ap.add_argument("--index",type=Path,default=Path(__file__).resolve().parents[2] / 'data/羽毛球比赛视频/接球动作片段精选/片段索引.json')
     ap.add_argument("--output",type=Path,required=True)
     ap.add_argument("--labels",nargs=2,default=["第13轮","第14轮"])
     ap.add_argument("--font",type=Path,default=Path('/System/Library/Fonts/STHeiti Medium.ttc'))

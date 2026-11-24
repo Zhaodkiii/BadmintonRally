@@ -16,8 +16,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from train_curves import CHANNELS, clock_fit, split, collect
 
-ROOT = Path.home() / "Downloads/动作采集"
-STORE = Path.home() / "Downloads/动作采集分析/本地训练台"
+ROOT = Path(__file__).resolve().parents[2] / "data/动作采集"
+STORE = Path(__file__).resolve().parents[2] / "data/动作采集分析/本地训练台"
 MATCH = ROOT / "比赛实时诊断"
 TOOLS = Path(__file__).resolve().parent
 

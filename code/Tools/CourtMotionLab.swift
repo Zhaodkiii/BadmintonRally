@@ -143,7 +143,11 @@ private final class TrialRunner {
   private static func film(_ trial: Trial, folder: URL, encoder: String, offsetMS: Int?) throws {
     try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
     let output = folder.appendingPathComponent(trial.name+".mp4")
-    let partial = folder.appendingPathComponent(trial.name+".partial.mp4")
+    guard !FileManager.default.fileExists(atPath:output.path) else {
+      throw CocoaError(.fileWriteFileExists)
+    }
+    let partial = folder.appendingPathComponent(UUID().uuidString+".partial.mp4")
+    defer { try? FileManager.default.removeItem(at:partial) }
     let pipe = Pipe()
     let movie = Process()
     movie.executableURL = URL(fileURLWithPath:encoder)
@@ -191,6 +195,15 @@ private final class TrialRunner {
   }
   static func main() throws {
     let app = NSApplication.shared
+    if CommandLine.arguments.count == 4, CommandLine.arguments[1] == "--films" {
+      let folder = URL(fileURLWithPath:CommandLine.arguments[2])
+      for trial in trials where trial.scene != .serve {
+        try autoreleasepool {
+          try film(trial,folder:folder,encoder:CommandLine.arguments[3],offsetMS:nil)
+        }
+      }
+      return
+    }
     if CommandLine.arguments.count >= 5, CommandLine.arguments[1] == "--film" {
       let args = CommandLine.arguments
       guard let trial = trials.first(where: { $0.name == args[2] && $0.scene != .serve }) else {
@@ -409,7 +422,7 @@ private final class TrialRunner {
     let window = NSWindow(contentRect:NSRect(x:0,y:0,width:850,height:490),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
     let view = SCNView(); window.contentView = view
     var index = 0, run = TrialRunner(trials[0])
-    let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/羽球动作回放")
+    let folder = URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("data/羽球动作回放")
     try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
     var audit = ["场景\t动作\t自动检查"]
     var contactError: Float?

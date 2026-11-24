@@ -48,11 +48,46 @@ private func link(_ node: SCNNode, _ a: V, _ b: V) {
   if length > 0.001 { node.simdOrientation = simd_quatf(from: V(0,1,0), to: delta/length) }
 }
 
+// A single closed jersey shell, authored in metres from the hip to the collar.
+// Its upper edge meets both shoulder caps even when the spine leans to the side.
+private func jerseyGeometry() -> SCNGeometry {
+  let rings: [(y: Float, width: Float, depth: Float)] = [
+    (-0.065,0.133,0.105), (-0.045,0.159,0.119), (0.048,0.158,0.116),
+    (0.265,0.186,0.134), (0.405,0.210,0.137), (0.463,0.211,0.122),
+    (0.492,0.179,0.107), (0.511,0.074,0.073)
+  ]
+  let sides = 24
+  var vertices: [SCNVector3] = [], normals: [SCNVector3] = [], triangles: [Int32] = []
+  for (r,ring) in rings.enumerated() {
+    let below = rings[max(0,r-1)], above = rings[min(r+1,rings.count-1)]
+    for column in 0..<sides {
+      let angle = 2*Float.pi*Float(column)/Float(sides)
+      let c = cos(angle), z = sin(angle)
+      vertices.append(SCNVector3(V(ring.width*c,ring.y,ring.depth*z)))
+      let rise = V((above.width-below.width)*c,above.y-below.y,(above.depth-below.depth)*z)
+      let along = V(-ring.width*z,0,ring.depth*c)
+      normals.append(SCNVector3(simd_normalize(simd_cross(rise,along))))
+      if r+1 < rings.count {
+        let a = Int32(r*sides+column), b = Int32(r*sides+(column+1)%sides)
+        let n = Int32(sides)
+        triangles += [a,a+n,b, b,a+n,b+n]
+      }
+    }
+  }
+  let top = Int32((rings.count-1)*sides)
+  for i in 1..<(sides-1) {
+    let j = Int32(i)
+    triangles += [0,j,j+1,top,top+j+1,top+j]
+  }
+  return SCNGeometry(sources:[SCNGeometrySource(vertices:vertices),SCNGeometrySource(normals:normals)],
+                     elements:[SCNGeometryElement(indices:triangles,primitiveType:.triangles)])
+}
+
 private final class CourtPlayer {
   let root = SCNNode()
   var groundShadow: SCNNode?
   private let limbs: [SCNNode]
-  private let torso, head, hair: SCNNode
+  private let torso, neck, head, hair, sleeve, offSleeve: SCNNode
   private let shoes: [SCNNode]
   private let rim, grip, palm, thumb, elbowJoint, wristJoint: SCNNode
   private var localContact = V.zero
@@ -74,8 +109,10 @@ private final class CourtPlayer {
   init(_ parent: SCNNode, _ shirt: UIColor) {
     parent.addChildNode(root)
     let skin = UIColor(red: 0.83, green: 0.59, blue: 0.43, alpha: 1)
-    torso = mesh(SCNCapsule(capRadius: 0.21, height: 0.65), shirt, root, V(0,1.12,0))
-    torso.simdScale.z = 0.72
+    torso = mesh(jerseyGeometry(),shirt,root)
+    neck = mesh(SCNCylinder(radius:0.064,height:1),skin,root)
+    sleeve = mesh(SCNCapsule(capRadius:0.071,height:0.20),shirt,root)
+    offSleeve = mesh(SCNCapsule(capRadius:0.071,height:0.20),shirt,root)
     head = mesh(SCNSphere(radius: 0.12), skin, root, V(0,1.62,0))
     hair = mesh(SCNSphere(radius: 0.115), .darkGray, root, V(0,1.665,0.015))
     let skeleton = root
@@ -151,7 +188,7 @@ private final class CourtPlayer {
         if tracksArrival {
           // Intercept anchors the feet. As the shuttle enters arm's reach,
           // prepare at its actual height and depth instead of the nominal point.
-          let anticipation = middleCourt ? 0.86 : 0.50
+          let anticipation = middleCourt || f.shot != .drive ? 0.86 : 0.50
           let ahead = min(1.0/30,Double(frameTime))*anticipation
           let arrival = now+Double(lead)
           preparationPoint = f.at(max(now+ahead,arrival-(middleCourt ? 0.10 : 0.09)))
@@ -213,14 +250,22 @@ private final class CourtPlayer {
       ankle.x += sign*(0.07*load + 0.21*loaded)
       // Exchange lead and trailing legs during the overhead scissor jump.
       ankle.z += facing*sign*side*lift*1.25*cos(.pi*airPhase)
-      if !still, lift < 0.005, distance < 0.35, distance > 0.0001 {
+      // Land the racket foot before a grounded forecourt lunge. Blend out the
+      // running stride before pinning the shoe; release it as the player recovers.
+      let lowNetReach = grounded && low && spot.map { abs($0.y-0.5) <= 0.15 } == true
+      let plantPhase = lowNetReach && sign == side ? min(1, supportPhase*1.35) : 0
+      if plantPhase >= 1, continuous {
+        if planted[i] == nil { planted[i] = feet+ankle }
+        ankle = planted[i]! - feet
+        ankle.y = 0.05
+      } else if !still, lift < 0.005, distance < 0.35, distance > 0.0001 {
         let stance = sign*cos(stridePhase) < 0
         if stance {
           if planted[i] == nil { planted[i] = feet+ankle }
           ankle = planted[i]! - feet
         } else {
           planted[i] = nil
-          ankle.y += 0.105 * max(0,sign*cos(stridePhase))
+          ankle.y += 0.105 * max(0,sign*cos(stridePhase)) * (1-plantPhase)
         }
       } else { planted[i] = nil }
       // Plant on the floor and solve a two-link leg. If a stride overshoots,
@@ -276,11 +321,8 @@ private final class CourtPlayer {
     // the button, on top of the distance the incoming shuttle just travelled.
     let entry = confirmed && rearCourt ? min(1,Float(contactAge!)/0.085) : 1
     let turn = side*facing*(swingTurn*entry + shoulderTurn + crossBodyTurn)
-    torso.simdEulerAngles.y = turn
     let netReach: Float = frontSpot && grounded ? 0.11*supportPhase : 0
     let upperShift = pelvis + V(supportShift*0.07,0,facing*(load*0.08+netReach))
-    torso.simdEulerAngles.z = -0.16*supportShift
-    torso.simdEulerAngles.x = facing*(load*0.14+netReach)
     let shoulder = upperShift + V(side*0.20*cos(turn),1.37-dip,-side*0.20*sin(turn))
     let guardPose = V(side*0.35,1.62-dip,facing*0.48)
     let swingSide = backhand ? -side : side
@@ -429,7 +471,6 @@ private final class CourtPlayer {
     let reachDirection = axis/max(simd_length(axis),0.001)
     // Let the body lean into a stretched return; keep the racket shaft rigid.
     let lean = reachDirection*min(0.38,max(0,simd_length(axis)-1.04))
-    torso.simdPosition = (pelvis+upperShift)*0.5 + V(0,1.12-dip,0)+lean*0.55
     head.simdPosition = upperShift + V(0,1.62-dip,0)+lean
     hair.simdPosition = head.simdPosition+V(0,0.045,0.015)
     let socket = shoulder + lean
@@ -556,6 +597,25 @@ private final class CourtPlayer {
                      facing*(0.70-1.40*spread+0.10*guide))
     let offElbow = offShoulder + simd_normalize(upperArm)*0.31
     let offHand = offElbow + simd_normalize(lowerArm)*0.28
+    // Fit the shirt and neck to the existing rig sockets after the arm solve.
+    // Rendering the torso never feeds back into reach, timing or racket IK.
+    let hips = pelvis + V(0,0.88-dip,0)
+    let collar = (socket+offShoulder)*0.5
+    let spine = collar-hips
+    let up = simd_normalize(spine)
+    let lateral = (socket-offShoulder)*side
+    let right = simd_normalize(lateral - up*simd_dot(up,lateral))
+    torso.simdPosition = hips
+    torso.simdOrientation = simd_quatf(simd_float3x3(columns:(right,up,simd_cross(right,up))))
+    torso.simdScale.y = simd_length(spine)/0.49
+    // Overlap both ends inside their adjacent meshes, including on a high
+    // stretch. A world-up offset would expose a seam during a sideways lean.
+    link(neck,collar-up*0.025,head.simdPosition)
+    for (node,shoulderJoint,elbowPoint) in [(sleeve,socket,elbow),(offSleeve,offShoulder,offElbow)] {
+      let arm = simd_normalize(elbowPoint-shoulderJoint)
+      node.simdPosition = shoulderJoint+arm*0.035
+      node.simdOrientation = simd_quatf(from:V(0,1,0),to:arm)
+    }
     link(limbs[7],offShoulder,offElbow)
     link(limbs[8],offElbow,offHand)
     rim.simdPosition = tip

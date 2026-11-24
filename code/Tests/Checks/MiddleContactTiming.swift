@@ -15,11 +15,21 @@ import simd
   ]
   static func main() {
     print("回法,左手,偏移ms,识别,触球高度m,握点跳变cm,拍头误差cm,过网,出球时间误差ms,出球位置误差mm,出射仰角度,出球初速mps,网顶余量m,距网终止深度m,横向终点m,最高m,全程秒")
+    verifyLowDownwardFault()
     for trial in trials {
       for left in [false,true] {
         for ms in [-100,-50,0,50,100] { measure(trial, left:left, offset:ms) }
       }
     }
+  }
+  private static func verifyLowDownwardFault() {
+    var game = Rally()
+    game.phase = .flight
+    game.flight = Flight(from:Position(x:0.32,y:0.66,z:0.225),to:Position(x:0.45,y:0.88),
+                         start:0,duration:0.6,arc:0.12,incoming:true,shot:.smash)
+    let input = SwingImpact(power:0.78,sweep:0.72,verticalSweep:-0.82)
+    precondition(game.swing(.smash,aim:0.1,impact:input,confirmedByButton:true) == .accepted)
+    precondition(game.flight?.netCollision != nil, "低点下压应该允许撞网")
   }
   private static func measure(_ t: Trial, left: Bool, offset: Int) {
     let court = CourtScene(), dt = 1.0/60
@@ -63,6 +73,10 @@ import simd
           let crossingTime = (lo+hi)/2
           let clearance = metres(result.at(crossingTime)).z-1.524
           precondition((clearance > 0) == (result.netCollision == nil))
+          if t.name == "接杀挡网" && offset == -50 {
+            precondition((0.625...0.690).contains(result.from.y), "测试未覆盖网前至中场过渡段")
+            precondition(clearance > 0.01, "有意的开放拍面在跨区时缺少过网余量")
+          }
           let stopTime = result.netCollision == nil ? result.start + result.duration : crossingTime
           let endpoint = result.at(stopTime)
           let apex = (0...240).map { metres(result.at(result.start+(stopTime-result.start)*Double($0)/240)).z }.max()!

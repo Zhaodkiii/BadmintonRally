@@ -839,15 +839,21 @@ struct Rally {
       }
     }
     if let impact { arc *= 1 + 0.30 * impact.verticalSweep }
-    let receivingFlat = flight?.incoming == true && flight?.shot == .drive && from.contactArea == "中场"
-    if (defendingSmash || receivingFlat), !netPlay, shot == .net, let impact, impact.strength >= 0.09,
+    // A yielding block blends continuously from a net touch to a midcourt
+    // defensive return as the contact moves through the short-court overlap.
+    let flatFeed = flight?.incoming == true && flight?.shot == .drive && from.y < 0.80
+    if defendingSmash || flatFeed, shot == .net, let impact, impact.strength >= 0.09,
        impact.verticalSweep > -0.32 {
+      let progress = min(1,max(0,(from.y - 0.625)/0.065))
+      let defenseWeight = progress * progress * (3 - 2*progress)
       let carry = min(1,max(0,impact.strength))
-      far.y = (defendingSmash ? 0.435 : 0.413) - 0.12*carry
+      let blockDepth = (defendingSmash ? 0.435 : 0.413) - 0.12*carry
+      far.y += defenseWeight * (blockDepth-far.y)
       let crossing = (0.5-from.y)/(far.y-from.y)
       if crossing > 0 && crossing < 1 {
         let clearance = (0.095 + 0.18*carry + 0.12*max(0,impact.verticalSweep)) * Flight.netHeight/1.524
-        arc = max(arc,(Flight.netHeight+clearance-from.z*(1-crossing))/Flight.arch(crossing,shot:shot))
+        let blockArc = (Flight.netHeight+clearance-from.z*(1-crossing))/Flight.arch(crossing,shot:shot)
+        arc += defenseWeight * max(0,blockArc-arc)
       }
     }
     if button {

@@ -48,3 +48,15 @@ RallyCaptureSessions/
 *.jsonl
 /StrokeModel.json
 /SwingCurves.json
+
+# Local captures, external reference repositories, and private working assets
+/data/
+/assets/参考/
+/assets/参考素材/ScreenRecording_*
+/assets/参考素材/美术参考/模拟器比赛画面.png
+/assets/参考素材/美术参考/采集示范-正手上挑.png
+/code/samples/
+/code/datasets/
+/code/exports/
+/code/StrokeModel.json
+/code/SwingCurves.json
