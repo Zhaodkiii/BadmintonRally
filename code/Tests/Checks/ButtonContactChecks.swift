@@ -44,6 +44,8 @@ import Foundation
   static func checkNetApproach() {
     func reply(load: Double, height: Double, aim: Double) -> Flight {
       var round = Rally()
+      round.playerX = 0.34
+      round.playerY = 0.65
       round.phase = .flight
       round.flight = Flight(from: .init(x: 0.34,y: 0.61,z: height),to: .init(x: 0.45,y: 0.70),
                             start: 0,duration: 1,arc: 0.25,incoming: true,shot: .weak)
@@ -126,8 +128,8 @@ import Foundation
     game.flight = Flight(from: .init(x: -0.8,y: 0.1,z: 0.5), to: .init(x: 0.9,y: 0.99),
                          start: game.now, duration: 1, arc: 0.2, incoming: true, shot: .drive)
     precondition(!game.hitWindowOpen)
-    precondition(game.swing(hit.stroke, aim: hit.aim, impact: hit.impact, confirmedByButton: true) == .accepted)
-    precondition(game.flight?.incoming == false && game.returns == 1)
+    precondition(game.swing(hit.stroke, aim: hit.aim, impact: hit.impact, confirmedByButton: true) == .early)
+    precondition(game.flight?.incoming == true && game.returns == 0)
     for style in ServeTraining.allCases {
       for format in [CourtFormat.singles, .doubles] {
         func target(_ effort: Double, _ aim: Double) -> Position {

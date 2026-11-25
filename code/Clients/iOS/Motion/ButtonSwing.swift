@@ -45,6 +45,37 @@ struct ButtonSwing {
     }
     return Self.serveModel?.predict(values)
   }
+  private struct CornerModel: Decodable {
+    let classes: [String], weights: [[Double]], bias: [Double]
+    static let bundled: Self? = {
+      guard let url = Bundle.main.url(forResource: "RearCorner", withExtension: "json"),
+            let bytes = try? Data(contentsOf: url),
+            let model = try? JSONDecoder().decode(Self.self, from: bytes),
+            Set(model.classes) == ["反手高远","反手吊球","头顶正手处理","其他"],
+            model.bias.count == model.classes.count, model.weights.count == model.classes.count,
+            model.weights.allSatisfy({ $0.count == 24 }) else { return nil }
+      return model
+    }()
+  }
+
+  private func cornerStyle(_ t: Double, since previous: Double) -> ReturnStyle? {
+    guard let model = CornerModel.bundled, previous <= t - 0.65 else { return nil }
+    let bounds = [-0.65,-0.32,-0.15,-0.06,0.0]
+    var values: [Double] = []
+    for (lower,upper) in zip(bounds,bounds.dropFirst()) {
+      let segment = frames.filter { $0.t > t+lower && $0.t <= t+upper }
+      guard segment.count >= 3 else { return nil }
+      let n = Double(segment.count)
+      let w = segment.reduce(V.zero) { $0 + $1.w } / n
+      let a = segment.reduce(V.zero) { $0 + $1.a } / n
+      values.append(contentsOf: [w.x,w.y,w.z,a.x,a.y,a.z])
+    }
+    let scores = zip(model.weights,model.bias).map { row,b in zip(row,values).reduce(b) { $0+$1.0*$1.1 } }
+    guard let best = scores.indices.max(by: { scores[$0] < scores[$1] }),
+          1 / scores.reduce(0, { $0+exp($1-scores[best]) }) >= 0.60 else { return nil }
+    return ReturnStyle(rawValue:model.classes[best])
+  }
+
   private var consumed = -Double.infinity
   struct Hit {
     let stroke: Stroke
@@ -55,13 +86,14 @@ struct ButtonSwing {
   }
   mutating func append(_ t: Double, _ w: V, _ a: V, _ g: V) {
     if let last = frames.last, t <= last.t || t - last.t > 0.05 { frames.removeAll(keepingCapacity: true) }
-    frames.removeAll { $0.t < t - 0.45 }
+    frames.removeAll { $0.t < t - 0.66 }
     frames.append(Frame(t: t, w: w, a: a, gravity: g))
   }
   mutating func press(_ t: Double, left: Bool, serving: Bool, bank: ReviewedCourt?,
                       intent: ServeIntentBank?) -> Hit {
     let tap = Hit(stroke: .drive, aim: 0, impact: SwingImpact(power: 0, sweep: 0, serveIntentConfirmed: serving), peakTime: t)
     let pre = frames.filter { $0.t > max(t - 0.32, consumed) && $0.t <= t }
+    let previousPress = consumed
     consumed = max(consumed, t)
     guard pre.count >= 5, let last = pre.last, t - last.t < 0.06 else { return tap }
     // Find a sustained lobe near the button. Do not choose a single noisy peak.
@@ -166,8 +198,9 @@ struct ButtonSwing {
       braking = min(1,max(0,1 - meanSpeed / best))
     }
     let probableBackhand = label?.contains("反手") == true
-    let impact = SwingImpact(power: power, sweep: sweep, serveIntentConfirmed: serving,
+    var impact = SwingImpact(power: power, sweep: sweep, serveIntentConfirmed: serving,
                              label: label, probableBackhand: probableBackhand, approachLoad: axialLoad, verticalSweep: launchSweep, lateralSweep: lateral, braking: braking)
+    if !serving, !left, impact.strength >= 0.09 { impact.cornerStyle = cornerStyle(t,since:previousPress) }
     return Hit(stroke: kind, aim: lateral, impact: impact, peakTime: pre[end].t,
                recognizedServe: recognized)
   }

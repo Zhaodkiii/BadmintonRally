@@ -28,6 +28,13 @@ import simd
     game.flight = Flight(from:Position(x:0.32,y:0.66,z:0.225),to:Position(x:0.45,y:0.88),
                          start:0,duration:0.6,arc:0.12,incoming:true,shot:.smash)
     let input = SwingImpact(power:0.78,sweep:0.72,verticalSweep:-0.82)
+    var distant = game
+    precondition(distant.swing(.smash,aim:0.1,impact:input,confirmedByButton:true) == .outOfReach,
+                 "原站位应判为超出触达范围")
+    precondition(distant.flight?.incoming == true, "够不到时来球应继续飞行")
+
+    game.playerX = 0.32
+    game.playerY = 0.70
     precondition(game.swing(.smash,aim:0.1,impact:input,confirmedByButton:true) == .accepted)
     precondition(game.flight?.netCollision != nil, "低点下压应该允许撞网")
   }

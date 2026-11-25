@@ -140,7 +140,7 @@ private final class TrialRunner {
     }
     try rows.joined(separator:"\n").write(to:folder.appendingPathComponent("回放.csv"),atomically:true,encoding:.utf8)
   }
-  private static func film(_ trial: Trial, folder: URL, encoder: String, offsetMS: Int?) throws {
+  private static func film(_ trial: Trial, folder: URL, encoder: String, offsetMS: Int?, left: Bool = false, sideView: Bool = false, phoneFrame: Bool = false) throws {
     try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
     let output = folder.appendingPathComponent(trial.name+".mp4")
     guard !FileManager.default.fileExists(atPath:output.path) else {
@@ -156,10 +156,19 @@ private final class TrialRunner {
                        "-crf","19","-pix_fmt","yuv420p","-movflags","+faststart",partial.path]
     movie.standardInput = pipe
     try movie.run()
-    let r = TrialRunner(trial,contactOffset:offsetMS.map { Double($0)/1000 })
+    let r = TrialRunner(trial,left:left,contactOffset:offsetMS.map { Double($0)/1000 })
     let renderer = SCNRenderer(device:MTLCreateSystemDefaultDevice(),options:nil)
     renderer.scene = r.court.scene
     renderer.pointOfView = r.court.camera
+    if sideView {
+      let camera = SCNNode()
+      camera.camera = SCNCamera()
+      camera.camera?.fieldOfView = 33
+      camera.position = SCNVector3(left ? -4.8 : 4.8,1.15,3.4)
+      camera.look(at:SCNVector3(0,0.85,2.15))
+      renderer.pointOfView = camera
+    }
+    let frameSize = phoneFrame ? CGSize(width:1280,height:588) : CGSize(width:800,height:450)
     var count = 0
     var contactFrame: Int?
     let start = r.game.now
@@ -167,7 +176,7 @@ private final class TrialRunner {
       for _ in 0..<300 {
         r.step()
         try autoreleasepool {
-          let image = renderer.snapshot(atTime:r.game.now,with:CGSize(width:800,height:450),antialiasingMode:.none)
+          let image = renderer.snapshot(atTime:r.game.now,with:frameSize,antialiasingMode:.none)
           guard let tiff = image.tiffRepresentation,
                 let data = NSBitmapImageRep(data:tiff)?.representation(using:.jpeg,properties:[.compressionFactor:0.89]) else {
             throw NSError(domain:"Missing rendered frame",code:1)
@@ -190,11 +199,108 @@ private final class TrialRunner {
     }
     try FileManager.default.moveItem(at:partial,to:output)
     let summary: [String:Any] = ["action":trial.name,"scene":trial.scene.rawValue,"fps":60,
-      "frames":count,"contactFrame":contactFrame,"gameStart":start]
+      "width":Int(frameSize.width),"height":Int(frameSize.height),"leftHanded":left,"camera":sideView ? "side" : "game","frames":count,"contactFrame":contactFrame,"gameStart":start]
     try JSONSerialization.data(withJSONObject:summary).write(to:folder.appendingPathComponent(trial.name+".json"),options:.atomic)
+  }
+  /// Studio portraits use the actual stepped player and skeleton, including live skinning.
+  private static func reviewHero(_ folder: URL) throws {
+    try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+    typealias V = SIMD3<Float>
+    let views: [(String,String,Int,V,Double)] = [
+      ("01背面准备","正手平抽",-38,V(0,0.05,1),1.08),
+      ("02屈肘挡网","接杀挡网",-5,V(1,0.08,-0.38),1.12),
+      ("03持拍手","接杀挡网",-5,V(1,0.22,-0.45),0.15),
+      ("04弓步后侧","挑直线",0,V(0.65,0.06,1),1.10),
+      ("05弓步侧面","挑直线",0,V(1,0.04,0),1.10),
+      ("06正面准备","正手平抽",-38,V(0.23,0.03,-1),1.08)
+    ]
+    for (label,action,offset,direction,size) in views {
+      let trial = trials.first { $0.name == action }!
+      let probe = TrialRunner(trial)
+      var triggerFrame = 0
+      while probe.hitTime == nil && triggerFrame < 300 { probe.step(); triggerFrame += 1 }
+      precondition(probe.hitTime != nil)
+      let run = TrialRunner(trial)
+      for _ in 0..<(triggerFrame+offset) { run.step() }
+      let scene = run.court.scene
+      let hero = scene.rootNode.childNode(withName:"V2Player",recursively:true)!
+      for item in scene.rootNode.childNodes where item !== hero && item.light == nil { item.isHidden = true }
+      scene.background.contents = NSColor(white:0.91,alpha:1)
+      let hand = hero.childNode(withName:"RacketHand",recursively:true)!
+      let focus = label == "03持拍手" ? hand.simdWorldPosition : hero.simdWorldPosition+V(0,0.88,0)
+      let camera = SCNNode()
+      camera.camera = SCNCamera()
+      camera.camera!.usesOrthographicProjection = true
+      camera.camera!.orthographicScale = size
+      scene.rootNode.addChildNode(camera)
+      camera.simdPosition = focus + simd_normalize(direction)*4
+      camera.look(at:SCNVector3(focus))
+      let renderer = SCNRenderer(device:MTLCreateSystemDefaultDevice(),options:nil)
+      renderer.scene = scene
+      renderer.pointOfView = camera
+      let frame = renderer.snapshot(atTime:run.game.now,with:CGSize(width:640,height:780),antialiasingMode:.multisampling4X)
+      guard let tiff = frame.tiffRepresentation,
+            let png = NSBitmapImageRep(data:tiff)?.representation(using:.png,properties:[:]) else {
+        throw NSError(domain:"Portrait render failed: "+label,code:1)
+      }
+      try png.write(to:folder.appendingPathComponent(label+".png"))
+    }
   }
   static func main() throws {
     let app = NSApplication.shared
+    if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--hero-review" {
+      try reviewHero(URL(fileURLWithPath:CommandLine.arguments[2]))
+      return
+    }
+    if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--hero-joints" {
+      print("动作,左手,帧数,掌心到拍柄线段最大距离米,肩点到袖中心最大距离米")
+      for name in ["高远球","接杀挡网","挑直线"] {
+        for left in [false,true] {
+          let run = TrialRunner(trials.first { $0.name == name }!,left:left)
+          let root = run.court.scene.rootNode
+          let hand = root.childNode(withName:"RacketHand",recursively:true)!
+          let handle = root.childNode(withName:"RacketGrip",recursively:true)!
+          let arm = root.childNode(withName:"RacketUpperArm",recursively:true)!
+          let sleeve = root.childNode(withName:"RacketSleeve",recursively:true)!
+          var gap: Float = 0, seam: Float = 0, count = 0
+          for _ in 0..<300 {
+            run.step()
+            let a = handle.simdConvertPosition(SIMD3(0,-0.5,0),to:nil)
+            let b = handle.simdConvertPosition(SIMD3(0,0.5,0),to:nil)
+            let h = hand.simdWorldPosition
+            let t = max(0,min(1,simd_dot(h-a,b-a)/simd_length_squared(b-a)))
+            gap = max(gap,simd_distance(h,a+t*(b-a)))
+            seam = max(seam,simd_distance(sleeve.simdWorldPosition,arm.simdConvertPosition(SIMD3(0,-0.5,0),to:nil)))
+            count += 1
+            if let hit = run.hitTime,run.game.now-hit >= 1 { break }
+          }
+          precondition(run.hitTime != nil && gap < 0.001 && seam < 0.071)
+          print("\(name),\(left),\(count),\(gap),\(seam)")
+        }
+      }
+      return
+    }
+    if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--export-hero" {
+      let game = TrialRunner(trials.first { $0.name == "正手平抽" }!)
+      game.step()
+      let scene = SCNScene()
+      guard let player = game.court.scene.rootNode.childNode(withName:"V2Player",recursively:true)?.clone() else {
+        throw NSError(domain:"Missing V2 player",code:1)
+      }
+      player.simdPosition = .zero
+      scene.rootNode.addChildNode(player)
+      let output = URL(fileURLWithPath:CommandLine.arguments[2])
+      guard scene.write(to:output,options:nil,delegate:nil,progressHandler:nil) else {
+        throw NSError(domain:"Unable to export posed character",code:2)
+      }
+      let reopened = try SCNScene(url:output,options:nil)
+      for name in ["V2Player","RacketHand","RacketGrip","StringBed","Ponytail"] {
+        guard reopened.rootNode.childNode(withName:name,recursively:true) != nil else {
+          throw NSError(domain:"Missing exported node "+name,code:3)
+        }
+      }
+      return
+    }
     if CommandLine.arguments.count == 4, CommandLine.arguments[1] == "--films" {
       let folder = URL(fileURLWithPath:CommandLine.arguments[2])
       for trial in trials where trial.scene != .serve {
@@ -209,7 +315,15 @@ private final class TrialRunner {
       guard let trial = trials.first(where: { $0.name == args[2] && $0.scene != .serve }) else {
         throw NSError(domain:"Unknown return action",code:1)
       }
-      try film(trial,folder:URL(fileURLWithPath:args[3]),encoder:args[4],offsetMS:args.count > 5 ? Int(args[5]) : nil)
+      var offset: Int?, left = false, sideView = false, phoneFrame = false
+      for option in args.dropFirst(5) {
+        if option == "--left" { left = true }
+        else if option == "--side" { sideView = true }
+        else if option == "--phone-frame" { phoneFrame = true }
+        else if offset == nil, let value = Int(option) { offset = value }
+        else { throw NSError(domain:"Invalid film option: "+option,code:1) }
+      }
+      try film(trial,folder:URL(fileURLWithPath:args[3]),encoder:args[4],offsetMS:offset,left:left,sideView:sideView,phoneFrame:phoneFrame)
       return
     }
     if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--rear-frames" {

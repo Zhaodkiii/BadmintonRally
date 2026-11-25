@@ -23,14 +23,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		BA1100000000000000000010 /* Exceptions for "Clients/iOS" folder in "BadmintonRally" target */ = {
+		BA1100000000000000000010 /* Exceptions for "iOS" folder in "BadmintonRally" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Config/PhoneNetwork.plist,
 			);
 			target = C30000000000000000000006 /* BadmintonRally */;
 		};
-		CA7700000000000000000020 /* Exceptions for "Clients/macOS" folder in "RallyCapture" target */ = {
+		CA7700000000000000000020 /* Exceptions for "macOS" folder in "RallyCapture" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Config/MacCapture.plist,
@@ -40,30 +40,35 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		BA1100000000000000000003 /* Tests/UI */ = {
+		BA1100000000000000000003 /* UI */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Tests/UI;
+			path = UI;
 			sourceTree = "<group>";
 		};
-		C30000000000000000000002 /* Clients/iOS */ = {
+		C30000000000000000000002 /* iOS */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				BA1100000000000000000010 /* Exceptions for "Clients/iOS" folder in "BadmintonRally" target */,
+				BA1100000000000000000010 /* Exceptions for "iOS" folder in "BadmintonRally" target */,
 			);
-			path = Clients/iOS;
+			path = iOS;
 			sourceTree = "<group>";
 		};
-		CA7700000000000000000001 /* Shared/Capture */ = {
+		CA7700000000000000000001 /* Shared */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Shared/Capture;
+			path = Shared;
 			sourceTree = "<group>";
 		};
-		CA7700000000000000000002 /* Clients/macOS */ = {
+		CA7700000000000000000002 /* macOS */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				CA7700000000000000000020 /* Exceptions for "Clients/macOS" folder in "RallyCapture" target */,
+				CA7700000000000000000020 /* Exceptions for "macOS" folder in "RallyCapture" target */,
 			);
-			path = Clients/macOS;
+			path = macOS;
+			sourceTree = "<group>";
+		};
+		E11000000000000000000003 /* Checks */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Checks;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -82,10 +87,9 @@
 		C30000000000000000000004 = {
 			isa = PBXGroup;
 			children = (
-				CA7700000000000000000001 /* Shared/Capture */,
-				CA7700000000000000000002 /* Clients/macOS */,
-				BA1100000000000000000003 /* Tests/UI */,
-				C30000000000000000000002 /* Clients/iOS */,
+				E11000000000000000000001 /* Clients */,
+				CA7700000000000000000001 /* Shared */,
+				E11000000000000000000002 /* Tests */,
 				C30000000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -98,6 +102,24 @@
 				C30000000000000000000001 /* BadmintonRally.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		E11000000000000000000001 /* Clients */ = {
+			isa = PBXGroup;
+			children = (
+				C30000000000000000000002 /* iOS */,
+				CA7700000000000000000002 /* macOS */,
+			);
+			path = Clients;
+			sourceTree = "<group>";
+		};
+		E11000000000000000000002 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				BA1100000000000000000003 /* UI */,
+				E11000000000000000000003 /* Checks */,
+			);
+			path = Tests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -115,7 +137,7 @@
 				BA1100000000000000000008 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				BA1100000000000000000003 /* Tests/UI */,
+				BA1100000000000000000003 /* UI */,
 			);
 			name = ClubFlowTests;
 			productName = ClubFlowTests;
@@ -135,8 +157,8 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				C30000000000000000000002 /* Clients/iOS */,
-				CA7700000000000000000001 /* Shared/Capture */,
+				C30000000000000000000002 /* iOS */,
+				CA7700000000000000000001 /* Shared */,
 			);
 			name = BadmintonRally;
 			productName = BadmintonRally;
@@ -155,8 +177,8 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				CA7700000000000000000001 /* Shared/Capture */,
-				CA7700000000000000000002 /* Clients/macOS */,
+				CA7700000000000000000001 /* Shared */,
+				CA7700000000000000000002 /* macOS */,
 			);
 			name = RallyCapture;
 			productName = RallyCapture;

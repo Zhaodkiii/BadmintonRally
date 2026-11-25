@@ -63,6 +63,7 @@ extension Position {
 }
 
 struct SwingImpact {
+  var cornerStyle: ReturnStyle? = nil
   let power, sweep: Double
   var serveIntentConfirmed = false
   var label: String?
@@ -115,6 +116,7 @@ struct Flight {
   var returnedSmash = false
   var probableBackhand: Bool? = nil
   var overheadFromBackhandCorner = false
+  var measuredRoundHead = false
   var compactAttack = false
   var invitesAttack = false
   var jumpHeightMeters = 0.0
@@ -243,7 +245,76 @@ enum CollectionScene: String, CaseIterable {
   }
 }
 
+/// An unsupervised controller response profile. Signed direction stays in the player's control.
+struct RearClearResponse: Decodable {
+  let aimMedian, aimUpper, soft, strong: Double
+  static let bundled: RearClearResponse? = {
+    guard let url = Bundle.main.url(forResource: "RearClearResponse", withExtension: "json"),
+          let data = try? Data(contentsOf: url),
+          let model = try? JSONDecoder().decode(Self.self, from: data),
+          model.aimMedian > 0, model.aimUpper > model.aimMedian, model.aimUpper < 1,
+          model.strong > model.soft else { return nil }
+    return model
+  }()
+
+  func widthFraction(_ aim: Double) -> Double {
+    let magnitude = min(1,abs(aim))
+    if magnitude <= aimMedian { return 0.50 * magnitude / aimMedian }
+    if magnitude <= aimUpper { return 0.50 + 0.34 * (magnitude-aimMedian)/(aimUpper-aimMedian) }
+    return 0.84 + 0.16 * (magnitude-aimUpper)/(1-aimUpper)
+  }
+
+  func carry(_ effort: Double) -> Double {
+    let middle = (soft + strong) / 2
+    let local = 0.5 + 0.5 * tanh((effort-middle)/max(0.12,strong-soft))
+    return 0.55 * effort + 0.45 * local
+  }
+}
+
+struct OverheadReturnModel: Decodable {
+  let classes: [String], weights: [[Double]], bias: [Double]
+  static let bundled: Self? = {
+    guard let url = Bundle.main.url(forResource: "OverheadReturns", withExtension: "json"),
+          let bytes = try? Data(contentsOf: url), let m = try? JSONDecoder().decode(Self.self, from: bytes),
+          m.classes.count == 3, m.bias.count == 3, m.weights.count == 3,
+          m.weights.allSatisfy({ $0.count == 5 }) else { return nil }
+    return m
+  }()
+  func refinement(_ impact: SwingImpact) -> Shot? {
+    guard let load = impact.approachLoad, let braking = impact.braking, impact.strength >= 0.09 else { return nil }
+    let x = [impact.power, impact.sweep, impact.verticalSweep, braking, load]
+    let scores = zip(weights,bias).map { w,b in zip(w,x).reduce(b) { $0+$1.0*$1.1 } }
+    guard let best = scores.indices.max(by: { scores[$0] < scores[$1] }) else { return nil }
+    let probability = 1 / scores.reduce(0) { $0 + exp($1-scores[best]) }
+    guard probability >= (classes[best] == "扣杀" ? 0.60 : 0.75) else { return nil }
+    switch classes[best] { case "扣杀": return .smash; case "吊球": return .net; case "高远球": return .clear; default: return nil }
+  }
+}
+
+#if DEBUG && (targetEnvironment(simulator) || P006_OFFLINE)
+private struct MatchRandom: RandomNumberGenerator {
+  var seed: UInt64?
+  mutating func next() -> UInt64 {
+    guard var state = seed else {
+      var system = SystemRandomNumberGenerator()
+      return system.next()
+    }
+    state &+= 0x9E3779B97F4A7C15
+    seed = state
+    var z = (state ^ (state >> 30)) &* 0xBF58476D1CE4E5B9
+    z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+    return z ^ (z >> 31)
+  }
+}
+#else
+private typealias MatchRandom = SystemRandomNumberGenerator
+#endif
+
 struct Rally {
+  private var matchRandom = MatchRandom()
+  #if DEBUG && (targetEnvironment(simulator) || P006_OFFLINE)
+  mutating func seedSimulatorMatch(_ seed: UInt64) { matchRandom.seed = seed }
+  #endif
   var format = CourtFormat.singles
   var gamesToWin = 1
   private(set) var gamesWon = [0, 0]
@@ -299,8 +370,9 @@ struct Rally {
       // Mirror the feeder as well as the receiving lane in collection. A
       // straight feed for one hand should not become diagonal for the other.
       if leftHanded { opponentX = -opponentX }
-      playerX = 0
-      playerY = min(0.96, feed.receiveY + 0.09)
+      let feedDirection: Double = trialSide == "反手侧" ? -1 : 1
+      playerX = distantReceiveStart ? (leftHanded ? 1 : -1)*feedDirection*0.72 : 0
+      playerY = min(0.96, feed.receiveY + (distantReceiveStart ? 0.18 : 0.09))
       opponentY = feed.originY
       targetX = playerX; targetY = playerY
       rivalTarget = opponentX; rivalY = opponentY
@@ -311,6 +383,9 @@ struct Rally {
   var collectionScene: CollectionScene?
   var randomAcrossAreas = false
   var receiveSide = "正手侧"
+  var distantReceiveStart = false
+  var overheadReturns = OverheadReturnModel.bundled
+  var rearClearResponse = RearClearResponse.bundled
   var leftHanded = false
   var intendedReply = "自由回球"
   var trialReply: String {
@@ -339,6 +414,7 @@ struct Rally {
     var fields = ["场景采集",scene.rawValue,String(repetition),String(sceneGroup),String(sceneBlockSize)]
     if scene == .serve { fields += [serveTraining.rawValue, serveGoal.lane, targetDepth, serveGoal.effort] }
     if scene != .serve { fields += [scene.area.rawValue, trialSide, trialReply, targetLane, targetDepth] }
+    if scene != .serve && distantReceiveStart { fields.append("远位起步") }
     return fields.joined(separator: "/")
   }
   private(set) var repetition = 0
@@ -363,6 +439,15 @@ struct Rally {
       return canHit(flight, at: time)
         && withinSwingReach(ball, dx: abs(playerX - ball.x), dy: abs(playerY - ball.y), sweep: 0)
     }
+  }
+  var stillApproachingLowFeed: Bool {
+    guard phase == .flight, let flight, flight.incoming, let point = predictedIntercept,
+          point.z * 1.524 / Flight.netHeight < 1.35,
+          now < flight.start + flight.duration else { return false }
+    // Measure the remaining run to the interception, not distance to the
+    // landing marker. Stop the cue when the current shuttle is playable.
+    let distance = hypot((playerX-point.x)*3.05,(playerY-point.y)*13.4)
+    return distance > 1.35 && !hitWindowOpen
   }
   private(set) var predictedIntercept: Position?
   var receivingStandOff = 0.040
@@ -508,6 +593,26 @@ struct Rally {
     case .finished: break
     }
   }
+  /// Commit a button return only after the match racket reaches the shuttle.
+  /// The candidate includes the chosen stroke and its pose at the press time.
+  @discardableResult
+  mutating func swing(_ kind: Stroke, aim: Double, impact: SwingImpact?,
+                      confirmedByButton: Bool, validateContact: (Rally) -> Bool) -> SwingDecision {
+    guard confirmedByButton, phase == .flight, flight?.incoming == true else {
+      return swing(kind, aim: aim, impact: impact, confirmedByButton: confirmedByButton)
+    }
+    var candidate = self
+    let decision = candidate.swing(kind, aim: aim, impact: impact, confirmedByButton: true)
+    if decision == .accepted && !validateContact(candidate) {
+      judgedContactTime = candidate.judgedContactTime
+      showSwing(kind, neutral: false, impact: impact, age: 0)
+      message = "拍面未触球"
+      return .outOfReach
+    }
+    self = candidate
+    return decision
+  }
+
   @discardableResult
   mutating func swing(_ kind: Stroke, aim: Double, age: Double = 0, neutral: Bool = false, impact: SwingImpact? = nil, confirmedByButton: Bool = false) -> SwingDecision {
     judgedContactTime = nil
@@ -546,6 +651,15 @@ struct Rally {
     let ball = f.at(at)
     let (x, y) = positionAt(at)
     showSwing(kind, neutral: neutral, impact: impact, age: age)
+    let reachMeters = hypot((x-ball.x)*3.05,(y-ball.y)*13.4)
+    if confirmedByButton {
+      if at >= f.start + f.duration || ball.z <= 0 { message = "球已落地"; return .late }
+      if ball.y < 0.5 { message = "挥早了"; return .early }
+      if ball.z * 1.524 / Flight.netHeight > Self.overheadLimit + 0.30 {
+        message = "球还太高 · 等下降"; return .tooHigh
+      }
+      if reachMeters > 2.40 { message = "离球太远"; return .outOfReach }
+    }
     guard confirmedByButton || canHit(f, at: at) else {
       let early = at <= f.start + f.duration
       lockUntil = now + 0.18
@@ -564,14 +678,14 @@ struct Rally {
       return .outOfReach
     }
     lockUntil = now + 0.18
-    // A confirmed press always contacts the ball. Reaching behind or outside the
-    // body still changes the quality of the exit, even on button-controlled shots.
-    let reachMeters = hypot(dx*3.05,dy*13.4)
+    // A shuttle near the limit of reach leaves less room for a full return.
+    let flightProgress = (at-f.start)/f.duration
+    let latePressure = max(0,(flightProgress-0.88)/0.12)
     let radialStretch = max(0,(reachMeters-0.62)/0.70)
     // A shuttle behind the racket shoulder can be close to the feet yet
     // leave little room to accelerate. Keep ordinary side contacts playable.
     let behind = ball.contactArea == "后场" ? max(0, (ball.y-y)*13.4 - 0.09) : 0
-    let stretch = confirmedByButton ? min(1,max(radialStretch,behind/0.85))
+    let stretch = confirmedByButton ? min(1,max(radialStretch,behind/0.85,latePressure))
       : max(dx / 0.52, dy / 0.35)
     let front = ball.y < 0.78 && ball.y <= y + 0.035
     let shortCourt = confirmedByButton ? (0.5...0.69).contains(ball.y) : front && ball.y < 0.75
@@ -585,7 +699,7 @@ struct Rally {
     let downward = pressingDown || !neutral && (kind == .smash || impact?.label == "网前扑球")
     let yielding = confirmedByButton && kind == .drive && (impact?.braking ?? 0) > 0.55
       && (impact?.sweep ?? 1) < 0.42 && strength < 0.52
-    let shot: Shot
+    var shot: Shot
     if armed || (confirmedByButton && strength < 0.04) {
       shot = .net
     } else if yielding {
@@ -612,30 +726,45 @@ struct Rally {
     } else {
       shot = kind == .lift ? .clear : .drive
     }
+    if confirmedByButton, !armed, !leftHanded, ball.contactArea == "后场",
+       f.shot == .clear || f.shot == .weak, shot == .clear || shot == .net || shot == .drive || shot == .smash,
+       let impact, !impact.probableBackhand, let refined = overheadReturns?.refinement(impact) {
+      shot = refined
+    }
+    let cornerStyle = confirmedByButton && !armed && !leftHanded && ball.contactArea == "后场" && ball.x < -0.20
+      ? impact?.cornerStyle : nil
+    var launchImpact = impact
+    if cornerStyle == .backClear || cornerStyle == .backDrop {
+      shot = cornerStyle == .backClear ? .clear : .net
+      launchImpact?.probableBackhand = true
+    }
     hits += 1
     returns += 1
     longest = max(longest, hits)
-    send(shot, aim: aim, from: ball, impact: impact, netPlay: shortCourt, stretch: stretch, defendingSmash: f.shot == .smash || f.shot == .power, button: confirmedByButton)
+    send(shot, aim: aim, from: ball, impact: launchImpact, netPlay: shortCourt, stretch: stretch, defendingSmash: f.shot == .smash || f.shot == .power, button: confirmedByButton)
     let relativeSide = (ball.x-x) * (leftHanded ? -1 : 1) * 3.05
     let handLabel = impact?.label ?? ""
     let backhandCorner = ball.contactArea == "后场" && ball.x * (leftHanded ? -1 : 1) < -0.20
     let overhead = backhandCorner && ball.z > 2.02 * Flight.netHeight / 1.524
       && stretch < 0.55 && relativeSide > -0.34
     // Court position can suggest a side but cannot prove a player's actual grip.
-    if impact?.probableBackhand == true || handLabel.contains("反手") {
+    if cornerStyle == .roundHead {
+      flight?.probableBackhand = false
+      flight?.measuredRoundHead = true
+    } else if launchImpact?.probableBackhand == true || handLabel.contains("反手") {
       flight?.probableBackhand = true
     } else if handLabel.contains("正手") {
       flight?.probableBackhand = false
     } else if !backhandCorner && abs(relativeSide) > 0.15 {
       flight?.probableBackhand = relativeSide < 0
     }
-    let roundHead = overhead && flight?.probableBackhand != true
+    let roundHead = cornerStyle == .roundHead || (overhead && flight?.probableBackhand != true)
     flight?.overheadFromBackhandCorner = roundHead
     flight?.compactAttack = (impact?.sweep ?? 1) < 0.42
     flight?.jumpHeightMeters = Flight.attackingJump(shot: shot, contact: ball, feet: Position(x: x,y: y), strength: strength)
     if let result = flight {
       let style = observedStyle(incoming: f,outgoing: result)
-      flight?.returnStyle = style
+      flight?.returnStyle = cornerStyle ?? style
     }
     if let step = lesson, flight?.netCollision == nil {
       if step.accepts(shot) {
@@ -677,7 +806,7 @@ struct Rally {
 
   func returnDescription(incoming: Flight, outgoing: Flight) -> String {
     if let style = outgoing.returnStyle ?? observedStyle(incoming:incoming,outgoing:outgoing) {
-      return style == .roundHead ? "头顶正手处理（站位推定）" : style.rawValue
+      return style == .roundHead && !outgoing.measuredRoundHead ? "头顶正手处理（站位推定）" : style.rawValue
     }
     switch (outgoing.from.contactArea, outgoing.shot) {
     case ("网前", .smash), ("网前", .power): return "低点下压"
@@ -733,8 +862,10 @@ struct Rally {
     case .power: speed = 0.56
     }
     var arc = shot == .clear || shot == .weak ? 0.53 : 0.19
+    let clearResponse = button && shot == .clear && from.contactArea == "后场" && !leftHanded
+      && impact?.probableBackhand != true && impact?.label?.contains("反手") != true ? rearClearResponse : nil
     if let impact {
-      let strength = impact.strength
+      let strength = clearResponse?.carry(impact.strength) ?? impact.strength
       speed *= 1.18 - 0.39 * strength
       let short = shot == .net
       far.y = short ? 0.40 - 0.13 * strength : 0.26 - 0.25 * strength
@@ -755,11 +886,13 @@ struct Rally {
     }
     if let impact, from.contactArea == "后场", shot == .net {
       // A rear-court drop still travels the length of the court before falling short.
-      far.y = 0.40 - 0.11 * impact.strength
+      far.y = 0.445 - 0.12 * impact.strength + 0.025 * (impact.braking ?? 0) - 0.10 * stretch
       speed = 1.13 - 0.20 * impact.strength
       let crossing = (0.5 - from.y) / (far.y - from.y)
       if crossing > 0 && crossing < 1 {
-        arc = max(arc, (Flight.netHeight + 0.045 - from.z * (1 - crossing)) / Flight.arch(crossing, shot: shot))
+        let clearance = 0.028 + 0.024*impact.strength + 0.065*stretch
+        arc = max(0,(Flight.netHeight + clearance - from.z*(1-crossing)) / Flight.arch(crossing,shot:shot))
+
       }
     }
     if defendingSmash, shot == .drive, impact?.label != "接杀反抽" {
@@ -863,7 +996,23 @@ struct Rally {
       let angle = min(1,max(-1,aim)) * steering
       let displacement = abs(from.y-far.y)*13.4*tan(angle)/3.05
       let room = max(0.001, format.halfWidth - (displacement >= 0 ? from.x : -from.x))
-      far.x = from.x + room * tanh(displacement / room)
+      if shot == .net && from.contactArea == "后场", let impact {
+        let angleFraction = 0.8 * abs(aim) + 0.2 * abs(aim) * impact.sweep
+        far.x = from.x + (aim < 0 ? -1 : 1) * room * angleFraction
+      } else if let clearResponse {
+        // Allocate lateral room once. A long flight should not saturate sooner than a short one.
+        let fraction = clearResponse.widthFraction(aim)
+        far.x = from.x + (aim < 0 ? -1 : 1) * room * fraction
+      } else {
+        far.x = from.x + room * tanh(displacement / room)
+      }
+    }
+    if button, from.contactArea == "后场", [.net, .clear, .smash].contains(shot) {
+      // Seed small placement variation from game time so a replay is reproducible.
+      let jitter = sin(now * 53.941 + aim * 9.31)
+      let dx = far.x - from.x
+      far.x = min(format.halfWidth,max(-format.halfWidth,far.x + dx * 0.025 * jitter))
+      far.y = min(0.48,max(0.005,far.y + (0.002 + 0.004 * min(1,stretch)) * jitter))
     }
     if button, from.contactArea == "中场", shot == .smash || shot == .power,
        let impact, impact.sweep < 0.42, impact.verticalSweep > -0.78,
@@ -883,11 +1032,11 @@ struct Rally {
       from: from, to: far, start: now, duration: speed,
       arc: arc, incoming: false, shot: shot, measured: impact != nil || netPlay || (shot == .smash && from.z <= Flight.netHeight))
     flight?.returnedSmash = defendingSmash
-    flight?.invitesAttack = netPlay && shot == .drive && stretch > 0.80
+    flight?.invitesAttack = stretch > 0.65 && (shot == .clear || shot == .net || shot == .drive)
     rivalTarget = far.x
     rivalY = far.y
     opponentDelay = now + [0.42, 0.30, 0.16][difficulty]
-    nextAI = now + speed * (Double.random(in: 0...1) < [0.23, 0.12, 0.05][difficulty] ? 1.1 : 0.8)
+    nextAI = now + speed * (Double.random(in: 0...1, using: &matchRandom) < [0.23, 0.12, 0.05][difficulty] ? 1.1 : 0.8)
     targetX = 0
     targetY = 0.80
   }
@@ -972,18 +1121,18 @@ struct Rally {
       message = "准备接球"
       return
     }
-    if phase == .serve && !practice { serve(short: Bool.random(), aim: 0); return }
+    if phase == .serve && !practice { serve(short: Bool.random(using: &matchRandom), aim: 0); return }
     let previous = flight
     let origin = previous?.at(now) ?? Position(x: opponentX, y: opponentY, z: 0.18)
     var shot: Shot =
-      (previous?.shot == .weak || previous?.invitesAttack == true) ? .power : [Shot.clear, .clear, .drive, .net, .weak].randomElement()!
+      (previous?.shot == .weak || previous?.invitesAttack == true) ? .power : [Shot.clear, .clear, .drive, .net, .weak].randomElement(using: &matchRandom)!
     if practice && drill == .clears { shot = .clear }
     if practice && drill == .flat { shot = .drive }
     let repeatNet = practice && !lessonEnabled && drill == .netTiming
     if repeatNet { shot = .net }
     if let lesson { shot = lesson.feed }
     let destination =
-      practice && drill == .sides ? (playerX >= 0 ? -0.85 : 0.85) : Double.random(in: -format.halfWidth...format.halfWidth)
+      practice && drill == .sides ? (playerX >= 0 ? -0.85 : 0.85) : Double.random(in: -format.halfWidth...format.halfWidth, using: &matchRandom)
     let to = Position(x: lessonEnabled || repeatNet ? 0 : destination, y: shot == .net ? 0.67 : 0.91)
     let duration = (shot == .power ? 0.83 : shot == .drive ? 1.03 : 1.38) * (practice ? 1.23 : 1.0)
     flight = Flight(
@@ -1009,13 +1158,32 @@ struct Rally {
     case .drive, .net: preferredHeight = 1.20
     case .power, .smash: preferredHeight = 0.95
     }
-    // Leave the racket a lane beside the body on short receptions. Right/left
-    // are relative to the incoming lateral displacement, including body shots.
-    func stanceX(_ ball: Position) -> Double {
-      guard ball.contactArea != "后场" || flight.shot == .smash || flight.shot == .power else { return ball.x }
+    func travelTime(toX x: Double, y: Double) -> Double {
+      let displacement = SIMD2((x-playerX)*3.05,(y-playerY)*13.4)
+      let distance = hypot(displacement.x, displacement.y)
+      let cap = Self.footSpeed(displacement/max(0.001,distance),facing:-1)
+      return distance < cap*cap/12 ? 2*sqrt(distance/12) : distance/cap + cap/12
+    }
+    func stanceX(_ ball: Position, y: Double, at time: Double) -> Double {
+      let hand = leftHanded ? -1.0 : 1.0
+      let width = format.halfWidth
+      func behindLane(_ offsetMetres: Double) -> Double {
+        max(-width,min(width,ball.x-offsetMetres/3.05))
+      }
+      if ball.contactArea == "后场", flight.shot != .smash && flight.shot != .power {
+        // Arrive behind the striking shoulder. A hurried non-racket-side
+        // reception stays inside the corner instead of chasing an overhead stance.
+        if ball.x*hand < -0.20 {
+          let overhead = behindLane(-0.12*hand)
+          if ball.z*1.524/Flight.netHeight > 2.02 &&
+               now+travelTime(toX:overhead,y:y)+0.20 <= time { return overhead }
+          return behindLane(-0.34*hand)
+        }
+        return behindLane(0.24*hand)
+      }
       let dx = ball.x-playerX
-      let side: Double = abs(dx) < 0.06 ? (leftHanded ? -1 : 1) : (dx < 0 ? -1 : 1)
-      return max(-format.halfWidth,min(format.halfWidth,ball.x-side*0.34/3.05))
+      let side = abs(dx) < 0.06 ? hand : (dx < 0 ? -1.0 : 1.0)
+      return behindLane(side*0.34)
     }
     var bestScore = Double.infinity
     var intercept = flight.to
@@ -1027,20 +1195,24 @@ struct Rally {
       let height = ball.z * 1.524 / Flight.netHeight
       guard height <= Self.overheadLimit else { continue }
       let y = min(0.98, max(0.54, ball.y + receivingStandOff))
-      let displacement = SIMD2((stanceX(ball)-playerX)*3.05,(y-playerY)*13.4)
-      let distance = hypot(displacement.x, displacement.y)
-      let cap = Self.footSpeed(displacement/max(0.001,distance),facing:-1)
-      let travel = distance < cap*cap/12 ? 2*sqrt(distance/12) : distance/cap + cap/12
+      let travel = travelTime(toX:stanceX(ball,y:y,at:t),y:y)
       let positionCost = collectionScene?.feed.map { 45 * abs(ball.y - $0.receiveY) } ?? abs(height-preferredHeight)
       let score = positionCost + 6*max(0,now+travel+0.20-t)
         + 1.2*abs(flight.to.y-ball.y)
       if score < bestScore { bestScore = score; intercept = ball; interceptAt = t }
     }
     predictedIntercept = intercept
-    // Stage one short step behind contact, then plant the feet for the swing.
-    targetX = stanceX(intercept)
-    targetY = min(0.98, max(0.54, intercept.y + receivingStandOff + 0.02))
-    adjustmentTime = interceptAt - 0.14
+    let depth = min(0.98,max(0.54,intercept.y + receivingStandOff))
+    targetX = stanceX(intercept,y:depth,at:interceptAt)
+    if intercept.contactArea == "后场" {
+      // Keeping a single rear receiving mark lets the player brake there.
+      // A second depth target 140 ms before impact used to restart both feet.
+      targetY = depth
+      adjustmentTime = .infinity
+    } else {
+      targetY = min(0.98,max(0.54,intercept.y + receivingStandOff + 0.02))
+      adjustmentTime = interceptAt - 0.14
+    }
   }
   private mutating func award(_ player: Bool, _ reason: String) {
     lastLanding = flight?.to

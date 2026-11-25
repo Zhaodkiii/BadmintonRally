@@ -9,6 +9,7 @@ struct StrokeDemonstration: View {
   @Environment(\.accessibilityReduceMotion) private var reduced
   @State private var origin = Date()
   @State private var selected: Int?
+  @State private var showsArt = false
 
   var body: some View {
     TimelineView(.animation(minimumInterval: 1/60, paused: elapsed != nil || (!recording && selected != nil) || reduced)) { clock in
@@ -33,6 +34,9 @@ struct StrokeDemonstration: View {
           Text("\(phase + 1)  \(StandardStroke.phases[phase])").font(.headline)
           Text(stroke.cues[phase]).font(.callout)
           if !recording {
+            if StandardStroke.gameTraining.contains(stroke) {
+              Button("角色图谱") { showsArt = true }.font(.footnote.bold()).buttonStyle(.bordered)
+            }
             HStack {
               Button("分步查看") { selected = selected.map { ($0+1)%4 } ?? 0 }
               if selected != nil && !reduced { Button("连播") { selected = nil; origin = Date() } }
@@ -41,5 +45,6 @@ struct StrokeDemonstration: View {
         }.padding(12).frame(width: 190, alignment: .leading)
       }.background(Color(red:0.08, green:0.19, blue:0.20)).clipShape(RoundedRectangle(cornerRadius:16))
     }
+    .sheet(isPresented: $showsArt) { StrokeArtLibrary(stroke: stroke) }
   }
 }

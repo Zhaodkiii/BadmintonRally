@@ -14,7 +14,7 @@ final class MotionInput: ObservableObject {
   }
   private let curveModel = SwingCurveModel.load(Bundle.main.url(forResource: "SwingCurves", withExtension: "json"))
   private let reviewedCourt = ReviewedCourt.load(Bundle.main.url(forResource: "ReviewedCourt", withExtension: "json"))
-  var curveVersion: String { (curveModel?.version ?? "未载入") + "/button-contact-v5/serve-intent-v3" + ((reviewedCourt?.highServeReferences?.isEmpty == false) ? "/high-serve-v1" : "") }
+  var curveVersion: String { (curveModel?.version ?? "未载入") + "/button-contact-v5/rear-corner-v1/overhead-return-v1/rear-clear-response-v1/serve-intent-v3" + ((reviewedCourt?.highServeReferences?.isEmpty == false) ? "/high-serve-v1" : "") }
   @Published private(set) var curveObservation = ""
   private var coach: SwingCoach?
   func resetServeAttempt() { coach?.resetServeAttempt() }

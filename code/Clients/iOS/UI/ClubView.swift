@@ -2,7 +2,7 @@ import AVFoundation
 import Combine
 import SwiftUI
 
-enum Page { case home, setup, airplay, court, pause, result, lab, settings, sync, jointCapture, motionTest, manualBatch }
+enum Page { case home, setup, airplay, court, pause, result, lab, settings, sync, jointCapture, motionTest, manualBatch, playerPreview }
 struct ClubView: View {
   @ObservedObject private var studio = StudioSender.shared
   @StateObject private var motion = MotionInput()
@@ -11,14 +11,25 @@ struct ClubView: View {
   @State private var liveCapture = LiveRallyBuffer()
   @State private var screenError: String?
   #endif
+  #if DEBUG && targetEnvironment(simulator)
+  @State private var simulatorSingles: SimulatorSinglesInput?
+  #endif
+  private var injectingSingles: Bool {
+    #if DEBUG && targetEnvironment(simulator)
+    simulatorSingles != nil
+    #else
+    false
+    #endif
+  }
   @State private var contactInput = VolumeContactInput()
   @State private var contactEpoch = UUID()
   @State private var contactCount = 0
   @State private var contactReady = false
   @State private var contactHint = ""
   @State private var referenceGroup = UUID()
-  @State private var page = Page.home
+  @State private var page: Page = ProcessInfo.processInfo.arguments.contains("-playerPreview") ? .playerPreview : .home
   @State private var game = Rally()
+  @State private var matchCourt: CourtScene?
   @State private var gamesToWin = 1
   @State private var format = CourtFormat.singles
   @State private var lastServeReadout = ""
@@ -39,6 +50,7 @@ struct ClubView: View {
   @State private var acrossAreas = false
   @State private var startingScene = CollectionScene.serve
   @State private var randomScenes = false
+  @State private var distantReceiveStart = false
   @State private var sceneBlockSize = 10
   @State private var training = false
   @State private var lesson = false
@@ -75,13 +87,17 @@ struct ClubView: View {
     ZStack {
       ink.ignoresSafeArea()
       if page == .court || page == .pause || page == .result {
-        SpatialCourt(game: game, reduced: reduced, leftHanded: left).ignoresSafeArea()
+        SpatialCourt(game: game, reduced: reduced, leftHanded: game.leftHanded, scene: matchCourt,
+                     poseUpdatedByMatchClock: injectingSingles)
+          .id(matchCourt.map(ObjectIdentifier.init)).ignoresSafeArea()
         if page == .court {
           matchHUD
         } else {
           Color.black.opacity(0.65).ignoresSafeArea()
           if page == .pause { pauseCard } else { resultCard }
         }
+      } else if page == .playerPreview {
+        PlayerPreview { page = .home }
       } else if page == .manualBatch {
         ManualBatchView(left: left) { page = .home }
       } else if page == .motionTest {
@@ -105,6 +121,21 @@ struct ClubView: View {
       if !studio.instruction.isEmpty {Text("采集 · " + studio.instruction).font(.headline).padding(7).background(.black.opacity(0.8),in:Capsule()).allowsHitTesting(false)}
     }
     .foregroundStyle(cream).tint(accent)
+    #if DEBUG && targetEnvironment(simulator)
+    .task {
+      guard ProcessInfo.processInfo.arguments.contains("-p006Singles"),
+            simulatorSingles == nil, page == .home else { return }
+      let replay = SimulatorSinglesInput(output: URL.documentsDirectory.appendingPathComponent("P006-单打.tsv"))
+      simulatorSingles = replay
+      replay.record("home", game: game, detail: "DEBUG simulator | seed 6006 | fixed 60 Hz")
+      try? await Task.sleep(for: .seconds(1.2))
+      guard !Task.isCancelled else { return }
+      setup(false)
+      try? await Task.sleep(for: .seconds(1.2))
+      guard !Task.isCancelled else { return }
+      startMatch()
+    }
+    #endif
     .onReceive(clock) { _ in tick() }
     .onAppear {
       reconnectStudio()
@@ -160,6 +191,7 @@ struct ClubView: View {
           secondary("动作测试") { page = .motionTest }
         }
         HStack {
+          secondary("角色动作") { page = .playerPreview }
           secondary("投屏指南") { page = .airplay }
           secondary("设置") { page = .settings }
           secondary("Mac 联合采集") { page = .jointCapture }
@@ -252,6 +284,7 @@ struct ClubView: View {
                     ForEach(["正手侧","反手侧","追身"], id: \.self) { Text($0) }
                   }.pickerStyle(.segmented)
                 }
+                Toggle("远位起步 · 练习追球扑救", isOn: $distantReceiveStart)
                 if !randomScenes {
                   Picker("本组目标回法", selection: $reply) {
                     ForEach(["自由回球"] + startingScene.replies, id: \.self) { Text($0) }
@@ -567,9 +600,10 @@ struct ClubView: View {
   }
 
   var hudMessage: String {
-    if game.waitingForDescent { return "高球 · 等下降" }
+    if game.stillApproachingLowFeed { return "正在追低球 · 尚未到位" }
+    if game.waitingForDescent { return "球还太高 · 等下降" }
     if game.armed { return "下一拍放网" }
-    if game.hitWindowOpen, let ball = game.flight?.at(game.now), ball.y < 0.75 {
+    if game.hitWindowOpen, let ball = game.flight?.at(game.now), ball.contactArea == "网前" {
       if ball.z > Flight.netHeight + 0.045 { return "网前高点 · 下压或轻托" }
       if ball.z < Flight.netHeight - 0.045 { return "低于网带 · 向上挑球" }
       return "网带附近 · 向前推球"
@@ -618,15 +652,17 @@ struct ClubView: View {
   }
   func startMatch() {
     guard #available(iOS 17.2, *) else { contactHint = "音量键击球需要 iOS 17.2 或更高版本"; return }
-    switch AVCaptureDevice.authorizationStatus(for: .video) {
-    case .notDetermined:
-      let origin = page
-      AVCaptureDevice.requestAccess(for: .video) { _ in
-        DispatchQueue.main.async { if page == origin { startMatch() } }
+    if !injectingSingles {
+      switch AVCaptureDevice.authorizationStatus(for: .video) {
+      case .notDetermined:
+        let origin = page
+        AVCaptureDevice.requestAccess(for: .video) { _ in
+          DispatchQueue.main.async { if page == origin { startMatch() } }
+        }
+        return
+      case .authorized: break
+      default: contactHint = "请在系统设置允许相机，以启用实体按键击球"; return
       }
-      return
-    case .authorized: break
-    default: contactHint = "请在系统设置允许相机，以启用实体按键击球"; return
     }
     if validating && left { contactHint = "验证使用右手模型，请先在设置切换为右手操作"; return }
     validation = ServeValidation()
@@ -634,7 +670,9 @@ struct ClubView: View {
     referenceGroup = UUID()
     repeatFeedback = ""
     lastServeReadout = ""
+    matchCourt = CourtScene()
     game = Rally()
+    game.leftHanded = injectingSingles ? false : left
     game.practice = training
     game.lessonEnabled = lesson
     game.drill = drill
@@ -650,8 +688,8 @@ struct ClubView: View {
       game.guidedServeTargets = guidedServeTargets
       game.targetEffort = targetEffort
       game.collectionScene = startingScene
+      game.distantReceiveStart = distantReceiveStart
       game.receiveSide = receiveSide
-      game.leftHanded = left
       game.intendedReply = randomScenes ? "自由回球" : reply
       game.randomAcrossAreas = acrossAreas
       game.sceneBlockSize = startingScene != .serve && randomScenes ? sceneBlockSize : 0
@@ -666,15 +704,21 @@ struct ClubView: View {
       game.targetEffort = "自由"
     }
     if !training { game.readyToServe() }
-    motion.startButtonInput()
+    if !injectingSingles { motion.startButtonInput() }
     motion.serving = game.phase == .serve && game.playerServes
-    game.difficulty = difficulty
+    game.difficulty = injectingSingles ? 1 : difficulty
+    #if DEBUG && targetEnvironment(simulator)
+    if let replay = simulatorSingles {
+      game.seedSimulatorMatch(SimulatorSinglesInput.seed)
+      replay.record("start", game: game, detail: "formal singles | standard AI | one game")
+    }
+    #endif
     game.offset = useTV ? syncMS / 1000 : 0
     resumeAt = 0
     lastTick = ProcessInfo.processInfo.systemUptime
     StudioSender.shared.event("court", at: ProcessInfo.processInfo.systemUptime)
     #if DEBUG
-    prepareLiveCapture()
+    if !injectingSingles { prepareLiveCapture() }
     if liveCapture.active { referenceGroup = liveCapture.match }
     flushLiveCapture(event: "start")
     #endif
@@ -699,7 +743,7 @@ struct ClubView: View {
   func resume() {
     lastTick = ProcessInfo.processInfo.systemUptime
     resumeAt = 0
-    motion.startButtonInput()
+    if !injectingSingles { motion.startButtonInput() }
     motion.serving = game.phase == .serve && game.playerServes
     StudioSender.shared.event("court", at: ProcessInfo.processInfo.systemUptime)
     page = .court
@@ -727,7 +771,7 @@ struct ClubView: View {
     liveCapture.active = false
     #endif
     page = .result
-    if !repeating { best = max(best, game.longest) }
+    if !repeating && !injectingSingles { best = max(best, game.longest) }
     motion.stop()
     UIApplication.shared.isIdleTimerDisabled = false
   }
@@ -737,7 +781,13 @@ struct ClubView: View {
     let isServe = game.phase == .serve && game.playerServes
     let incoming = game.flight
     let inReach = game.hitWindowOpen
-    let decision = game.swing(kind, aim: aim, impact: impact, confirmedByButton: true)
+    let decision = game.swing(kind, aim: aim, impact: impact, confirmedByButton: true) { candidate in
+      matchCourt?.canContact(candidate, left: candidate.leftHanded) == true
+    }
+    #if DEBUG && targetEnvironment(simulator)
+    simulatorSingles?.record("press", game: game,
+      detail: "\(isServe ? "serve" : "return") | \(kind.rawValue) | \(decision.rawValue) | \(game.message)")
+    #endif
     if validating && isServe && decision == .accepted {
       validation.trials.append(.init(number: game.repetition, contactTime: time,
         prediction: sample.recognizedServe ?? "动作待定"))
@@ -809,7 +859,7 @@ struct ClubView: View {
   func tick() {
     guard page == .court, lifecycle == .active else { return }
     let t = ProcessInfo.processInfo.systemUptime
-    let dt = max(0, min(0.08, t - lastTick))
+    let dt = injectingSingles ? 1.0/60.0 : max(0, min(0.08, t - lastTick))
     lastTick = t
     if resumeAt > 0 {
       if t >= resumeAt { resumeAt = 0 }
@@ -820,6 +870,15 @@ struct ClubView: View {
     let previousFlight = game.flight?.start
     let points = game.pointCount
     game.tick(dt)
+    #if DEBUG && targetEnvironment(simulator)
+    if let replay = simulatorSingles, let input = replay.input(for: game) {
+      contactCount += 1
+      confirmContact(input, time: t)
+    }
+    // SwiftUI may combine display updates. Advance the recording rig once per simulation tick.
+    if injectingSingles { matchCourt?.update(game, reduced: reduced, left: game.leftHanded) }
+    if points != game.pointCount { simulatorSingles?.record("point", game: game, detail: game.message) }
+    #endif
     if validating && previousPhase != .point && game.phase == .point, let i = validation.trials.indices.last {
       validation.trials[i].outcome = game.message
       saveValidation()
@@ -839,10 +898,16 @@ struct ClubView: View {
       previousPhase != game.phase ? "phase" : previousFlight != game.flight?.start ? "flight" : nil
     flushLiveCapture(event: transition)
     #endif
-    if game.phase == .finished { finish() }
+    if game.phase == .finished {
+      finish()
+      #if DEBUG && targetEnvironment(simulator)
+      simulatorSingles?.record("finished", game: game, detail: "result page | " + game.message)
+      #endif
+    }
   }
 
   private func startContactInput() {
+    if injectingSingles { contactReady = true; return }
     let epoch = UUID()
     contactEpoch = epoch
     contactInput.onReady = { ready in

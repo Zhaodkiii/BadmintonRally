@@ -2,7 +2,19 @@ import AVFoundation
 import SwiftUI
 
 @main struct BadmintonRallyApp: App {
-  var body: some Scene { WindowGroup { ClubView().preferredColorScheme(.dark) } }
+  var body: some Scene {
+    WindowGroup {
+      #if DEBUG
+      if ProcessInfo.processInfo.arguments.contains("-contactFrameReplay") {
+        ContactFrameReplay()
+      } else {
+        ClubView().preferredColorScheme(.dark)
+      }
+      #else
+      ClubView().preferredColorScheme(.dark)
+      #endif
+    }
+  }
 }
 
 final class MatchFeedback {
