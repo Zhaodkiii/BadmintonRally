@@ -673,6 +673,26 @@ private final class CourtPlayer {
     }
     return best
   }
+  // Project the posed figure onto a small translucent patch in court metres.
+  // Computing the union in one fragment avoids dark overlaps at bone joints.
+  private func poseShadow(feet:V, lift:Float, hips:V, collar:V, head:V, elbow:V,
+                          wrist:V, freeElbow:V, freeHand:V, tip:V) {
+    guard let node = groundShadow, let ink = node.geometry?.firstMaterial else { return }
+    node.simdPosition = feet + V(-0.55,0.012,0.16)
+    func projected(_ p:V) -> SIMD2<Float> {
+      let h = max(0,p.y+lift)
+      return SIMD2(p.x-0.71*h,p.z+0.28*h)
+    }
+    func segment(_ name:String,_ p:V,_ q:V) {
+      let a = projected(p), b = projected(q)
+      ink.setValue(NSValue(scnVector4:SCNVector4(a.x,a.y,b.x,b.y)),forKey:name)
+    }
+    segment("body",hips,collar)
+    segment("feetPair",shoes[0].simdPosition,shoes[1].simdPosition)
+    segment("headElbow",head,elbow)
+    segment("armPair",wrist,tip)
+    segment("freePair",freeElbow,freeHand)
+  }
   var tipInWorld: V { root.simdPosition + rim.simdPosition }
   func pose(_ feet: V, side: Float, facing: Float, now: Double, elapsed: Double,
             stroke: Stroke, impact: SwingImpact?, incoming: Flight?, outgoing: Flight?, intercept: Position?, still: Bool, point: Int? = nil, attemptedAt: Double? = nil, rivalReadiness: Float = 0, serving: Bool = false) {
@@ -779,7 +799,6 @@ private final class CourtPlayer {
     let supportPhase = confirmed ? max(0, 1 - max(0, Float(contactAge!) - 0.07)/0.28) : windup
     let crouch: Float = !still && landingAge >= 0 && landingAge < 0.18
       ? amplitude*0.35*sin(.pi*landingAge/0.18) : (lift == 0 ? 0.065*supportPhase : 0)
-    groundShadow?.simdPosition = feet + V(-0.14,0.012,0.06)
     root.simdPosition = feet + V(0,lift,0)
     let step = distance > 0.0001 && !still ? sin(history.stridePhase)*0.22 : 0
     let travel = distance > 0.0001 ? delta/distance : V(0,0,facing)
@@ -843,7 +862,10 @@ private final class CourtPlayer {
     // A receiver settles into an open split stance between shots. Ease it away
     // through preparation so the measured contact remains the IK target.
     let guardWeight: Float = grounded ? (1-min(1,abs(step)/0.09))*(1-min(1,supportPhase*1.8))*(confirmed ? 0 : 1) : 0
-    let dip = 0.065*guardWeight + crouch + lunge + load*0.055 + 0.22*rescueLoad + 0.17*history.rivalLoad
+    // The reference receiver opens toward the racket side and loads the outside hip.
+    // Fade this pose as the interception takes over so it cannot move the impact.
+    let openGuard = guardWeight*(1-history.serveSetup)
+    let dip = 0.065*guardWeight + 0.055*openGuard + crouch + lunge + load*0.055 + 0.22*rescueLoad + 0.17*history.rivalLoad
     let inferredSide = relativeContact.x*side < -0.30 && !high
     // A previous return remains in Rally for replay. Its grip must not leak
     // into the next incoming shuttle's preparation.
@@ -875,7 +897,7 @@ private final class CourtPlayer {
     // discrete phase change otherwise adds a second wrist displacement at
     // the button, on top of the distance the incoming shuttle just travelled.
     let entry = confirmed && rearCourt ? min(1,Float(contactAge!)/0.085) : 1
-    let turn = side*facing*(0.25*guardWeight + swingTurn*entry + shoulderTurn + history.crossBodyTurn)
+    let turn = side*facing*(0.25*guardWeight + 0.31*openGuard + swingTurn*entry + shoulderTurn + history.crossBodyTurn)
     let netReach: Float = frontSpot && grounded ? 0.11*supportPhase : 0
     // Leave room in front of the chest for a descending rear-court shot.
     // Load the rear hip during the approach and unload it through recovery.
@@ -887,10 +909,10 @@ private final class CourtPlayer {
     history.rearLean += (rearLoad-history.rearLean)*(continuous ? 1-exp(-14*frameTime) : 1)
     let outside = min(1,max(-1,-relativeContact.x/0.25))*rearLoad
     history.rearLateral += (outside-history.rearLateral)*(continuous ? 1-exp(-14*frameTime) : 1)
-    let upperShift = pelvis + V(history.supportShift*0.07+0.2*history.rearLateral,-0.12*rescueLoad,
-      facing*(0.065*guardWeight+load*0.08+netReach-0.3*history.rearLean)) + 0.28*history.rescueReach
+    let upperShift = pelvis + V(history.supportShift*0.07+0.2*history.rearLateral+side*0.183*openGuard,-0.12*rescueLoad,
+      facing*(0.065*guardWeight+0.11*openGuard+load*0.08+netReach-0.3*history.rearLean)) + 0.28*history.rescueReach
     let shoulder = upperShift + V(side*0.20*cos(turn),1.37-dip,-side*0.20*sin(turn))
-    let guardPose = V(side*(0.35+0.26*guardWeight-0.23*history.rivalLoad),1.62-0.25*guardWeight-dip-0.84*history.serveSetup,
+    let guardPose = V(side*(0.35+0.26*guardWeight+0.14*openGuard-0.23*history.rivalLoad),1.62-0.25*guardWeight-0.05*openGuard-dip-0.84*history.serveSetup,
                       facing*(0.48+0.27*history.rivalLoad+0.07*history.serveSetup))
     let swingSide = backhand ? -side : side
     var back = V(swingSide*(high ? 0.47 : 0.80),high ? 1.98 : low || stroke == .lift ? 0.75 : 1.30,-facing*0.32)
@@ -1094,8 +1116,10 @@ private final class CourtPlayer {
       let sign: Float = i == 0 ? -1 : 1
       var ankle = V(sign*0.20,0.05 + lift*(sign > 0 ? 0.32 : 0.12),facing*(sign*side*lunge*1.7-sign*lift*0.22)) + travel*(sign*step)
       let loaded = max(0,sign*history.supportShift)
-      ankle.x += sign*(0.125*guardWeight + 0.07*load + 0.21*loaded)
-      ankle.z += sign*side*facing*0.095*guardWeight
+      ankle.x += sign*(0.125*guardWeight + 0.16*openGuard + 0.07*load + 0.21*loaded)
+      // Receiver's racket foot trails toward the camera in the reference;
+      // the lead shoe points into court. Service and supported reaches retain their own step.
+      ankle.z += sign*side*facing*(0.095*guardWeight-0.38*openGuard)
       let extra = brace * max(0.15*supportPhase,0.14*readyBase)
       // The leading shoe catches the reach; the trailing leg counterbalances.
       let leadSide: Float = abs(history.rescueReach.x) > 0.18 ? (history.rescueReach.x > 0 ? 1 : -1) : side
@@ -1153,6 +1177,8 @@ private final class CourtPlayer {
       let pole = simd_normalize(guide-axis*simd_dot(guide,axis))
       let along = (thigh*thigh-shin*shin+length*length)/(2*length)
       let knee = hip+axis*along+pole*sqrt(max(0,thigh*thigh-along*along))
+      let toeYaw = (facing > 0 ? Float.pi : 0) + sign*facing*openGuard*0.28
+      shoes[i].simdEulerAngles.y = toeYaw
       shoes[i].simdPosition = ankle + V(0,-0.007,facing*0.045)
       link(limbs[2*i],hip,knee)
       link(limbs[2*i+1],knee,ankle)
@@ -1168,7 +1194,7 @@ private final class CourtPlayer {
     // At full reach gradually align the shaft with the arm to keep contact attainable.
     let serveGrip = impact?.label.flatMap { ServeTraining(rawValue:$0) } != nil && confirmed
     let shaftPose = serveGrip ? simd_normalize(V(-side*0.50,-0.72,facing*0.55))
-      : simd_normalize(V(swingSide*(backhand ? 0.52 : 0.38),
+      : simd_normalize(V(swingSide*((backhand ? 0.52 : 0.38)+0.30*openGuard),
                                      low && active ? 0.24 : 0.85, facing*0.43))
     var preferred = shaftPose
     if continuous, let old = history.gripAxis {
@@ -1330,8 +1356,13 @@ private final class CourtPlayer {
     // Bend the free forearm towards the waist as the racket extends low.
     // Its elbow can still open backwards to balance the supported lunge.
     let fold = lowReach
-    let balanceUpper = upperArm*(1-fold) + V(-side*0.32,-0.57,-facing*0.30)*fold
-    let balanceLower = lowerArm*(1-fold) + V(side*0.26,0.42,facing*0.36)*fold
+    // In a settled split step the free elbow is behind the ribs; its hand
+    // returns to the hip. Open the arm again to guide an incoming overhead.
+    let waitingArm = openGuard*(1-guide)*(1-fold)
+    let tuckedUpper = blend(upperArm,V(-side*0.38,-0.58,-facing*0.48),waitingArm)
+    let tuckedLower = blend(lowerArm,V(side*0.29,-0.16,facing*0.52),waitingArm)
+    let balanceUpper = tuckedUpper*(1-fold) + V(-side*0.32,-0.57,-facing*0.30)*fold
+    let balanceLower = tuckedLower*(1-fold) + V(side*0.26,0.42,facing*0.36)*fold
     let balanceDirection = simd_normalize(balanceUpper) + V(-side, 0.20, -facing*0.35)*flatBalance
     let offElbow = offShoulder + simd_normalize(balanceDirection)*0.31
     let offHand = offElbow + simd_normalize(balanceLower)*0.28
@@ -1358,6 +1389,8 @@ private final class CourtPlayer {
       limbSkins[3].pose(offShoulder,offElbow,offHand)
     }
     hands?.pose(wrist:wrist,crease:crease,shaft:dir,knuckles:knuckleSide,freeHand:offHand,freeElbow:offElbow,side:side,continuous:continuous,frameTime:frameTime)
+    poseShadow(feet:feet,lift:lift,hips:hips,collar:collar,head:head.simdPosition,elbow:elbow,
+               wrist:wrist,freeElbow:offElbow,freeHand:offHand,tip:tip)
     rim.simdPosition = tip
     // Local Z follows the long axis of the hoop. Roll its string bed with the forearm.
     let face = simd_normalize(V((backhand ? -side : side)*0.32,low ? 0.52 : 0.12,facing))
@@ -1514,6 +1547,87 @@ private func addPavilionFlowerBox(_ group:SCNNode,center:V,length:Float,alongZ:B
   }
 }
 
+// The artist's calibrated view is used only to unwrap the venue. Every island
+// occupies a separate world-space depth; the live camera uses normal projection.
+private func paintedRiversideHall() -> SCNNode? {
+  struct Surface: Decodable { let name:String; let rect:[Float] }
+  let folder = "RiversideHall.scnassets"
+  var url = Bundle.main.url(forResource:"Layout",withExtension:"json",subdirectory:folder)
+  #if os(macOS)
+  if url == nil {
+    url = URL(fileURLWithPath:FileManager.default.currentDirectoryPath)
+      .appendingPathComponent("code/Clients/iOS/Resources/\(folder)/Layout.json")
+  }
+  #endif
+  guard let url, let data = try? Data(contentsOf:url),
+        let surfaces = try? JSONDecoder().decode([Surface].self,from:data) else { return nil }
+  let hall = SCNNode()
+  hall.name = "RiversidePaintedArchitecture"
+  let pitch:Float = 2.35 * .pi / 180
+  let focal:Float = 225/tan(33.5 * Float.pi/360)
+  let eye = V(0,1.90,12.61)
+  func vertex(_ u:Float,_ v:Float) -> SCNVector3 {
+    let x = (u-400)/focal, y = (225-v)/focal
+    let ray = V(x,cos(pitch)*y-sin(pitch),-cos(pitch)-sin(pitch)*y)
+    func groundDepth(_ row:Float) -> Float {
+      let dy = cos(pitch)*(225-row)/focal-sin(pitch)
+      return 1.925/max(0.015,-dy)
+    }
+    // Adjacent islands must agree where they meet. Giving the quay, gallery
+    // and roof separate constant plane distances opens holes on a high clear.
+    // Intersect each ray with one continuous vault, two galleries and the deck.
+    let side = u < 390 ? (264-u)/264 : (u-502)/298
+    let sideRow = 253+max(0,side)*(u<390 ? 90 : 95)
+    let rx = (u-385)/132, ry = max(0,191-v)/66
+    let endDepth = groundDepth(253)
+    let barrel = endDepth/max(0.22,sqrt(rx*rx+ry*ry))
+    let shell = max(10.5,min(endDepth,groundDepth(sideRow),barrel))
+    // Recess the side window smoothly into its wall to preserve motion
+    // parallax without pulling open the outline of a distant spectator.
+    let riverX = max(0,1-pow((u-743)/142,2))
+    let riverY = max(0,1-pow((v-178)/64,2))
+    let reveal = 3.8*riverX*riverX*riverY*riverY
+    let depth = min(shell+reveal,groundDepth(v))
+    return SCNVector3(eye+ray*depth)
+  }
+  for surface in surfaces {
+    guard surface.rect.count == 4 else { return nil }
+    let bounds = surface.rect
+    let file = url.deletingLastPathComponent().appendingPathComponent(surface.name+".png")
+    guard FileManager.default.fileExists(atPath:file.path) else { return nil }
+    let cols = max(2,Int(ceil((bounds[2]-bounds[0])/9)))
+    let rows = max(2,Int(ceil((bounds[3]-bounds[1])/8)))
+    var pos:[SCNVector3] = [], uv:[CGPoint] = [], indices:[Int32] = []
+    for j in 0...rows {
+      let t = Float(j)/Float(rows)
+      for i in 0...cols {
+        let s = Float(i)/Float(cols)
+        pos.append(vertex(bounds[0]+s*(bounds[2]-bounds[0]),bounds[1]+t*(bounds[3]-bounds[1])))
+        uv.append(CGPoint(x:CGFloat(s),y:CGFloat(t)))
+        if i<cols && j<rows {
+          let a = Int32(j*(cols+1)+i), b = a+Int32(cols+1)
+          indices += [a,b,a+1,a+1,b,b+1]
+        }
+      }
+    }
+    let geo = SCNGeometry(sources:[SCNGeometrySource(vertices:pos),SCNGeometrySource(textureCoordinates:uv)],
+                          elements:[SCNGeometryElement(indices:indices,primitiveType:.triangles)])
+    let paint = SCNMaterial()
+    paint.diffuse.contents = file
+    paint.lightingModel = .constant
+    paint.isDoubleSided = true
+    paint.diffuse.mipFilter = .linear
+    paint.diffuse.maxAnisotropy = 8
+    paint.shaderModifiers = [.fragment:"if (_output.color.a < 0.5) { discard_fragment(); }"]
+    geo.materials = [paint]
+    let mesh = SCNNode(geometry:geo)
+    mesh.name=surface.name
+    mesh.castsShadow=false
+    hall.addChildNode(mesh)
+  }
+  return hall
+}
+
 private func addRiversideHall(to root:SCNNode) {
   let architecture = SCNNode()
   func finish(_ r:CGFloat,_ g:CGFloat,_ b:CGFloat) -> SCNMaterial {
@@ -1554,17 +1668,18 @@ private func addRiversideHall(to root:SCNNode) {
     link(node,a,b)
   }
 
-  let floor = SCNPlane(width:23,height:33)
+  let floor = SCNPlane(width:46,height:56)
   let boards = finish(0.82,0.65,0.49)
   if let tile = parquetTile() {
     boards.diffuse.contents = tile
     boards.diffuse.wrapS = .repeat
     boards.diffuse.wrapT = .repeat
-    boards.diffuse.contentsTransform = SCNMatrix4MakeScale(5.75,8.25,1)
+    boards.diffuse.contentsTransform = SCNMatrix4MakeScale(11.5,14,1)
     boards.diffuse.mipFilter = .linear
   }
   floor.materials = [boards]
   let deck = SCNNode(geometry:floor)
+  deck.name = "PerimeterFloor"
   deck.simdPosition = V(0,-0.055,-1)
   deck.simdEulerAngles.x = -.pi/2
   root.addChildNode(deck)
@@ -1831,10 +1946,18 @@ private func addRiversideHall(to root:SCNNode) {
 
 final class CourtScene {
   let scene = SCNScene(), camera = SCNNode()
+  private let traditionalHall = SCNNode()
+  private let paintedHall = paintedRiversideHall()
   private var cameraTime: Double?
   private var overheadFraming: Float = 0
   private var baselineRetreat: Float = 0
-  var cameraAspect: Float = 16.0/9.0
+  // Calibrated to the centre 16:9 framing in the painted court elevation.
+  // Wider displays reveal the side galleries through the same projection.
+  private static let referenceAspect: Float = 16.0/9.0
+  private static let openingEye = V(0,1.90,12.61)
+  private static let openingPitch: Float = 2.35
+  private static let openingField: CGFloat = 33.5
+  var cameraAspect: Float = CourtScene.referenceAspect
   private var tracking = V.zero
   private let players: [CourtPlayer]
   private let trail: [SCNNode]
@@ -1917,14 +2040,24 @@ final class CourtScene {
     func box(_ x: CGFloat,_ y: CGFloat,_ z: CGFloat,_ at: V,_ color: UIColor) -> SCNNode {
       mesh(SCNBox(width:x,height:y,length:z,chamferRadius:0),color,root,at)
     }
-    addRiversideHall(to:root)
+    addRiversideHall(to:traditionalHall)
+    root.addChildNode(traditionalHall)
+    if let deck = traditionalHall.childNode(withName:"PerimeterFloor",recursively:false) { root.addChildNode(deck) }
+    if let paintedHall { root.addChildNode(paintedHall); traditionalHall.isHidden = true }
     let mat = SCNPlane(width:6.65,height:13.85)
     let coating = SCNMaterial()
     coating.lightingModel = .constant
-    coating.diffuse.contents = Self.courtTexture("RiversideCourtMat","jpg") as Any?
+    coating.diffuse.contents = Self.courtTexture("RiversideGouacheMat","jpg") as Any?
       ?? UIColor(red:0.40,green:0.54,blue:0.62,alpha:1)
     coating.diffuse.mipFilter = .linear
-    coating.diffuse.maxAnisotropy = 8
+    coating.diffuse.maxAnisotropy = 16
+    // Compensate for the loss of gouache contrast at grazing incidence. SceneKit
+    // samples the colour plate in linear light; keep the quiet mid-blue anchored.
+    coating.shaderModifiers = [.surface: """
+      #pragma body
+      _surface.diffuse.rgb = max(float3(0.0), (_surface.diffuse.rgb - float3(0.138, 0.238, 0.332))
+        * 1.60 + float3(0.173, 0.274, 0.371));
+      """]
     mat.materials = [coating]
     let surface = SCNNode(geometry:mat)
     surface.name = "WatercolourCourtMat"
@@ -1961,12 +2094,43 @@ final class CourtScene {
     }
     players = [CourtPlayer(root,UIColor(red:0.96,green:0.31,blue:0.29,alpha:1),heroine:true),CourtPlayer(root,.systemCyan,rival:true),CourtPlayer(root,.systemOrange),CourtPlayer(root,.systemCyan)]
     for player in players {
-      let shadow = mesh(SCNPlane(width:1.13,height:0.56),.clear,root)
+      let shadow = mesh(SCNPlane(width:5.2,height:4.0),.white,root)
       shadow.name = "AthleteContactShadow"
-      shadow.simdEulerAngles = V(-.pi/2,0,-0.35)
+      shadow.simdEulerAngles = V(-.pi/2,0,0)
       if let paint = shadow.geometry?.firstMaterial {
         paint.lightingModel = .constant
-        paint.diffuse.contents = Self.courtTexture("CourtFootShadow","png")
+        paint.diffuse.contents = UIColor.white
+        paint.blendMode = .alpha
+        paint.shaderModifiers = [.surface: """
+          #pragma arguments
+          float4 body;
+          float4 feetPair;
+          float4 headElbow;
+          float4 armPair;
+          float4 freePair;
+          #pragma transparent
+          #pragma body
+          float2 p = (_surface.diffuseTexcoord - 0.5) * float2(5.2,4.0) + float2(-0.55,0.16);
+          #define SEG(A,B,R) (length(p-((A)+clamp(dot(p-(A),(B)-(A))/max(dot((B)-(A),(B)-(A)),0.0001),0.0,1.0)*((B)-(A))))-(R))
+          float d = SEG(body.xy,body.zw,0.137);
+          d = min(d,length(p-headElbow.xy)-0.122);
+          d = min(d,SEG(feetPair.xy,body.xy,0.055));
+          d = min(d,SEG(feetPair.zw,body.xy,0.060));
+          d = min(d,SEG(headElbow.zw,body.zw,0.052));
+          d = min(d,SEG(headElbow.zw,armPair.xy,0.043));
+          d = min(d,SEG(armPair.xy,armPair.zw,0.021));
+          d = min(d,SEG(body.zw,freePair.xy,0.047));
+          d = min(d,SEG(freePair.xy,freePair.zw,0.040));
+          _surface.diffuse = float4(0.092,0.11,0.15,0.31*(1.0-smoothstep(-0.018,0.032,d)));
+          #undef SEG
+          """, .fragment: """
+          #pragma body
+          if (_surface.diffuse.a < 0.002) { discard_fragment(); }
+          _output.color = float4(float3(0.015, 0.022, 0.031) * _surface.diffuse.a, _surface.diffuse.a);
+          """]
+        for key in ["body","feetPair","headElbow","armPair","freePair"] {
+          paint.setValue(NSValue(scnVector4:SCNVector4Zero),forKey:key)
+        }
         paint.writesToDepthBuffer = false
       }
       player.groundShadow = shadow
@@ -1979,9 +2143,10 @@ final class CourtScene {
     intercept = mesh(SCNTorus(ringRadius:0.12,pipeRadius:0.025),.systemMint,root)
     service = box(2.59,0.005,4.72,.zero,UIColor(red:0.54,green:0.77,blue:0.72,alpha:0.11))
     camera.camera = SCNCamera()
-    camera.camera?.fieldOfView = 30.0
-    camera.simdPosition = V(0,1.72,13.15)
-    camera.simdEulerAngles = V(-0.38 * .pi/180,0,0)
+    camera.camera?.projectionDirection = .vertical
+    camera.camera?.fieldOfView = Self.openingField
+    camera.simdPosition = Self.openingEye
+    camera.simdEulerAngles = V(-Self.openingPitch * .pi/180,0,0)
     root.addChildNode(camera)
     for type in [SCNLight.LightType.ambient,.directional] {
       let lamp = SCNNode()
@@ -2038,6 +2203,8 @@ final class CourtScene {
     simd_distance(players[0].tipInWorld, world(contact))
   }
   func update(_ game: Rally,reduced: Bool,left: Bool) {
+    traditionalHall.isHidden = paintedHall != nil && !reduced
+    paintedHall?.isHidden = reduced
     poseNear(players[0], game:game, left:left)
     let f = game.flight
     for i in players.indices.dropFirst() {
@@ -2099,7 +2266,7 @@ final class CourtScene {
     // Track with translation only. Fixed pitch and court-aligned yaw/roll
     // keep the posts and painted cross-court lines level throughout a rally.
     let feet = world(Position(x:game.playerX,y:game.playerY))
-    let cameraTarget = V(feet.x*0.12,0,(feet.z-3.7)*0.24)
+    let cameraTarget = V(feet.x*0.09,0,(feet.z-3.7)*0.18)
     let dt = game.now - (cameraTime ?? game.now)
     if reduced { tracking = .zero }
     else if cameraTime == nil || dt < 0 { tracking = cameraTarget }
@@ -2108,9 +2275,11 @@ final class CourtScene {
     cameraTime = game.now
     // The artwork establishes eye position from the two net posts and baselines.
     // A small lateral slide preserves that vanishing point through footwork.
-    camera.camera?.fieldOfView = reduced ? 43 : 30.0
-    let base = V(tracking.x,reduced ? 4.50 : 1.72,reduced ? 13.2 : 13.15+tracking.z)
-    camera.simdEulerAngles = V((reduced ? -20 : -0.38) * .pi/180,0,0)
+    let verticalField = reduced ? CGFloat(43) : Self.openingField
+    let aspectCompensation = max(1,Self.referenceAspect/max(cameraAspect,0.1))
+    camera.camera?.fieldOfView = 360 / CGFloat.pi * atan(tan(verticalField * .pi/360) * CGFloat(aspectCompensation))
+    let base = reduced ? V(0,4.50,13.2) : Self.openingEye + tracking
+    camera.simdEulerAngles = V((reduced ? -20 : -Self.openingPitch) * .pi/180,0,0)
     // Lift and retreat together: a high clear gains headroom while the feet
     // stay inside the lower edge. Forecast the actual flight before its apex.
     let retreat = reduced ? V(0,1,1.4) : V(0,0.65,1.8)
