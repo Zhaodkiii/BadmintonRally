@@ -25,6 +25,9 @@ struct SpatialCourt: UIViewRepresentable {
     return view
   }
   func updateUIView(_ view: SCNView, context: Context) {
+    if view.bounds.height > 0 {
+      context.coordinator.cameraAspect = Float(view.bounds.width/view.bounds.height)
+    }
     if !poseUpdatedByMatchClock {
       context.coordinator.update(game, reduced: reduced, left: leftHanded)
     }
@@ -1344,10 +1347,239 @@ private final class CourtPlayer {
 
 }
 
+// The parquet tile repeats at a physical scale. Seams and grain use one texture
+// so the number of draw calls does not depend on the size of the playing hall.
+private func parquetTile() -> CGImage? {
+  let side = 512
+  guard let context = CGContext(data:nil,width:side,height:side,bitsPerComponent:8,bytesPerRow:side*4,
+    space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+  context.setFillColor(red:0.56,green:0.40,blue:0.29,alpha:1)
+  context.fill(CGRect(x:0,y:0,width:side,height:side))
+  for row in 0..<16 {
+    let offset = (row*47)%128
+    for plank in -1..<5 {
+      let seed = (row*13 + (plank+4)%4*7)%11
+      let tint = CGFloat(seed)*0.006
+      let x = 128*plank+offset, y = row*32
+      context.setFillColor(red:0.77+tint,green:0.60+tint,blue:0.44+tint,alpha:1)
+      context.fill(CGRect(x:x+1,y:y+1,width:127,height:31))
+      for line in 0..<5 {
+        let gx = x+(seed*3+line*17)%65, gy = y+3+(seed+line*7)%25
+        context.setFillColor(red:0.61,green:0.44,blue:0.30,alpha:0.16)
+        context.fill(CGRect(x:gx,y:gy,width:19+(line*11)%35,height:1))
+      }
+    }
+  }
+  return context.makeImage()
+}
+
+private func addRiversideHall(to root:SCNNode) {
+  let architecture = SCNNode()
+  func finish(_ r:CGFloat,_ g:CGFloat,_ b:CGFloat) -> SCNMaterial {
+    let material = SCNMaterial()
+    material.diffuse.contents = UIColor(red:r,green:g,blue:b,alpha:1)
+    material.lightingModel = .lambert
+    return material
+  }
+  let oak = finish(0.59,0.35,0.21), honey = finish(0.78,0.54,0.32)
+  let timber = finish(0.36,0.26,0.22), metal = finish(0.31,0.36,0.36)
+  let coral = finish(0.80,0.34,0.24), cream = finish(0.96,0.86,0.66)
+  let shadow = finish(0.25,0.20,0.16)
+  @discardableResult func block(_ size:V,_ at:V,_ material:SCNMaterial) -> SCNNode {
+    let geometry = SCNBox(width:CGFloat(size.x),height:CGFloat(size.y),length:CGFloat(size.z),chamferRadius:0)
+    geometry.materials = [material]
+    let node = SCNNode(geometry:geometry)
+    node.simdPosition = at
+    architecture.addChildNode(node)
+    return node
+  }
+  func beam(_ a:V,_ b:V,width:Float,depth:Float,material:SCNMaterial) {
+    let node = block(V(width,1,depth),.zero,material)
+    link(node,a,b)
+  }
+
+  let floor = SCNPlane(width:23,height:33)
+  let boards = finish(0.82,0.65,0.49)
+  if let tile = parquetTile() {
+    boards.diffuse.contents = tile
+    boards.diffuse.wrapS = .repeat
+    boards.diffuse.wrapT = .repeat
+    boards.diffuse.contentsTransform = SCNMatrix4MakeScale(5.75,8.25,1)
+    boards.diffuse.mipFilter = .linear
+  }
+  floor.materials = [boards]
+  let deck = SCNNode(geometry:floor)
+  deck.simdPosition = V(0,-0.055,-1)
+  deck.simdEulerAngles.x = -.pi/2
+  root.addChildNode(deck)
+
+  // Glulam portal frames and boarded roof wings leave a broad glazed lantern
+  // over centre court. Open sides and the far gable look through to the river.
+  let bays:[Float] = [-16,-10,-4,2,8,14]
+  func curve(_ angle:Float,_ z:Float) -> V {
+    V(9.7*sin(angle),4.2+3.45*cos(angle),z)
+  }
+  let sections = 16
+  for z in bays {
+    for side:Float in [-1,1] {
+      block(V(0.32,4.2,0.39),V(side*9.7,2.05,z),timber)
+      block(V(0.52,0.32,0.55),V(side*9.7,0.12,z),metal)
+      beam(V(side*9.7,2.85,z),curve(side*1.04,z),width:0.17,depth:0.23,material:oak)
+    }
+    for i in 0..<sections {
+      let a = (Float(i)/Float(sections)-0.5)*Float.pi
+      let b = a+Float.pi/Float(sections)
+      beam(curve(a,z),curve(b,z),width:0.28,depth:0.35,material:oak)
+    }
+  }
+  let zMid:Float = -1
+  for i in 0..<sections {
+    let a = (Float(i)/Float(sections)-0.5)*Float.pi
+    let b = a+Float.pi/Float(sections)
+    let p = curve(a,zMid)+V(0,0.17,0), q = curve(b,zMid)+V(0,0.17,0)
+    if abs((a+b)*0.5)>0.48 {
+      beam(p,q,width:0.10,depth:30.4,material:i.isMultiple(of:2) ? honey : oak)
+    }
+    block(V(0.085,0.095,30.35),p,abs(a)<0.5 ? metal : timber)
+  }
+  for z in stride(from:Float(-14.5),through:14,by:1.5) {
+    for side:Float in [-1,1] {
+      beam(curve(0,z),curve(side*0.46,z),width:0.035,depth:0.05,material:metal)
+    }
+  }
+
+  // A corner kiosk faces the playing area, with recessed service openings,
+  // a projecting counter and a striped fabric awning.
+  let kiosk = V(-7.4,0,-10.7)
+  func kioskPart(_ size:V,_ offset:V,_ material:SCNMaterial) {
+    block(size,kiosk+offset,material)
+  }
+  kioskPart(V(4.7,2.95,2.8),V(0,1.43,0),coral)
+  kioskPart(V(4.95,0.21,3.0),V(0,2.99,0),oak)
+  kioskPart(V(4.85,0.095,2.93),V(0,2.82,0),cream)
+  kioskPart(V(3.6,1.12,0.08),V(0,1.60,1.43),shadow)
+  kioskPart(V(3.95,0.11,0.48),V(0,1.02,1.55),honey)
+  for x:Float in [-1.8,0,1.8] { kioskPart(V(0.075,1.13,0.10),V(x,1.60,1.49),oak) }
+  for i in 0..<11 {
+    let x = Float(i-5)*0.36
+    let fabric = i.isMultiple(of:2) ? cream : coral
+    let panel = block(V(0.36,0.045,1.0),kiosk+V(x,2.34,1.83),fabric)
+    panel.simdEulerAngles.x = 0.32
+    kioskPart(V(0.36,0.14,0.045),V(x,2.12,2.30),fabric)
+  }
+  for x:Float in [-1.78,-0.90,0,0.90,1.78] {
+    kioskPart(V(0.05,0.82,0.065),V(x,0.46,1.43),oak)
+  }
+
+  kioskPart(V(3.54,0.07,0.15),V(0,1.74,1.50),honey)
+  let celadon = finish(0.43,0.62,0.56)
+  for x:Float in [-1.43,-1.23,-0.93,0.38,0.60] {
+    kioskPart(V(0.11,0.15,0.08),V(x,1.84,1.54),cream)
+  }
+  kioskPart(V(0.58,0.42,0.11),V(1.08,1.28,1.55),celadon)
+  kioskPart(V(0.60,0.045,0.16),V(1.08,1.51,1.55),cream)
+
+  // Low quay rail, with the top rail below the far player's shoulders.
+  block(V(22.6,0.085,0.11),V(0,0.85,-17.2),honey)
+  block(V(22.6,0.025,0.025),V(0,0.46,-17.2),metal)
+  for x in stride(from:Float(-11),through:11,by:2.2) {
+    block(V(0.065,0.86,0.065),V(x,0.40,-17.2),metal)
+  }
+
+  // Bell-shaped enamel pendants are lit by the hall lights; the diffusers
+  // use emission without adding any per-pixel light sources.
+  let diffuser = finish(1,0.89,0.67)
+  diffuser.emission.contents = UIColor(red:0.46,green:0.34,blue:0.18,alpha:1)
+  for z:Float in [-16,-10,-4,2] {
+    for x:Float in [-3.8,3.8] {
+      block(V(0.025,0.62,0.025),V(x,6.99,z),metal)
+      let shade = SCNCone(topRadius:0.085,bottomRadius:0.30,height:0.19)
+      shade.radialSegmentCount = 14
+      shade.materials = [metal,metal,diffuser]
+      let fixture = SCNNode(geometry:shade)
+      fixture.simdPosition = V(x,6.63,z)
+      architecture.addChildNode(fixture)
+    }
+  }
+
+  let greens = [finish(0.25,0.42,0.29),finish(0.35,0.50,0.27),finish(0.50,0.59,0.30)]
+  let petals = finish(0.89,0.58,0.35)
+  for at in [V(-5.35,0,-8.95),V(-9.78,0,-8.9),V(6.7,0,-5.95),V(7.45,0,-12.8)] {
+    block(V(1.05,0.40,0.57),at+V(0,0.16,0),honey)
+    block(V(1.12,0.065,0.63),at+V(0,0.37,0),oak)
+    for i in 0..<14 {
+      let t = Float(i)*2.4
+      let geo = SCNSphere(radius:1)
+      geo.segmentCount = 7
+      geo.materials = [i.isMultiple(of:5) ? petals : greens[i%3]]
+      let leaf = SCNNode(geometry:geo)
+      leaf.simdPosition = at+V(0.42*cos(t),0.48+0.08*cos(2*t),0.20*sin(t))
+      leaf.simdScale = i.isMultiple(of:5) ? V(0.08,0.10,0.07) : V(0.13,0.28,0.14)
+      leaf.simdEulerAngles.z = cos(t)*0.63
+      architecture.addChildNode(leaf)
+    }
+  }
+
+  // Two short banks open onto a central aisle on the river-facing side.
+  for z:Float in [-9.4,-2.4] {
+    for row in 0..<3 {
+      let x = 5.9+Float(row)*0.73, height = 0.25+Float(row)*0.31
+      block(V(0.73,height,5.8),V(x,height/2-0.05,z),oak)
+      block(V(0.81,0.09,5.94),V(x,height-0.005,z),honey)
+    }
+  }
+  // Seated spectators are static scenery, with their feet on the lower tier.
+  let hair = finish(0.20,0.16,0.16), denim = finish(0.24,0.34,0.38)
+  let skin = [finish(0.84,0.62,0.46),finish(0.68,0.46,0.34)]
+  func oval(_ at:V,_ radii:V,_ material:SCNMaterial) -> SCNNode {
+    let geometry = SCNSphere(radius:1)
+    geometry.segmentCount = 12
+    geometry.materials = [material]
+    let node = SCNNode(geometry:geometry)
+    node.simdPosition = at
+    node.simdScale = radii
+    architecture.addChildNode(node)
+    return node
+  }
+  func limb(_ a:V,_ b:V,_ radius:Float,_ material:SCNMaterial) {
+    let segment = oval((a+b)*0.5,V(radius,simd_distance(a,b)/2+radius*0.35,radius),material)
+    segment.simdOrientation = simd_quatf(from:V(0,1,0),to:simd_normalize(b-a))
+  }
+  let guests:[(x:Float,z:Float,row:Int)] = [(6.65,-8.2,1),(7.37,-3.65,2),(6.64,-1.75,1)]
+  for (i,guest) in guests.enumerated() {
+    let hip = V(guest.x-0.12,0.25+Float(guest.row)*0.31+0.14,guest.z)
+    let complexion = skin[i%2], shirt = [celadon,coral,cream][i]
+    let shoulder = hip+V(-0.13,0.46,0)
+    let head = shoulder+V(-0.055,0.21,0)
+    limb(hip,shoulder,0.17,shirt)
+    _ = oval(head,V(0.105,0.14,0.104),complexion)
+    _ = oval(head+V(0.016,0.061,0),V(0.111,0.097,0.111),hair)
+    _ = oval(head+V(-0.098,0.003,-0.014),V(0.028,0.030,0.027),complexion)
+    if i == 0 { _ = oval(head+V(0.11,-0.005,0),V(0.07,0.095,0.062),hair) }
+    for sign:Float in [-1,1] {
+      let thigh = hip+V(0,0,0.09*sign)
+      let knee = thigh+V(-0.37,-0.035,0.038*sign)
+      let ankle = knee+V(-0.035,-0.31,0)
+      limb(thigh,knee,0.102,denim)
+      limb(knee,ankle,0.056,complexion)
+      _ = oval(ankle+V(-0.041,-0.046,0),V(0.12,0.055,0.062),cream)
+      let sleeve = shoulder+V(0,-0.055,0.12*sign)
+      let elbow = sleeve+V(-0.13,-0.22,0.04*sign)
+      let hand = knee+V(-0.025,0.10,0)
+      limb(sleeve,elbow,0.060,shirt)
+      limb(elbow,hand,0.043,complexion)
+    }
+  }
+  // Static components sharing a finish can be submitted together.
+  root.addChildNode(architecture.flattenedClone())
+}
+
 final class CourtScene {
   let scene = SCNScene(), camera = SCNNode()
   private var cameraTime: Double?
   private var overheadFraming: Float = 0
+  private var baselineRetreat: Float = 0
+  var cameraAspect: Float = 16.0/9.0
   private var tracking = V.zero
   private let players: [CourtPlayer]
   private let trail: [SCNNode]
@@ -1358,29 +1590,43 @@ final class CourtScene {
   private let cork: SCNNode
   private lazy var contactProbe = CourtPlayer(SCNNode(),.white)
   private let shadow, landing, intercept, service: SCNNode
+  private static func addRiverPanorama(to root: SCNNode) {
+    var texture = Bundle.main.url(forResource: "RiversidePanorama", withExtension: "jpg")
+    #if os(macOS)
+    // Standalone court review tools run from the repository root without an app bundle.
+    if texture == nil {
+      texture = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appendingPathComponent("code/Clients/iOS/Resources/RiversidePanorama.jpg")
+    }
+    #endif
+    guard let texture, FileManager.default.fileExists(atPath: texture.path) else { return }
+    let panel = SCNPlane(width: 84, height: 35)
+    let paint = SCNMaterial()
+    paint.lightingModel = .constant
+    paint.diffuse.contents = texture
+    paint.diffuse.mipFilter = .linear
+    panel.materials = [paint]
+    // Mirror the riverbank beyond either edge for wide displays and overhead clears.
+    // Put the waterline below the deck so the lower edge never floats above it.
+    paint.isDoubleSided = true
+    for section in -1...1 {
+      let node = SCNNode(geometry: panel)
+      node.name = "RiverPanorama"
+      node.castsShadow = false
+      node.simdPosition = V(Float(section) * 84, 8.9, -42)
+      if section != 0 { node.simdScale.x = -1 }
+      root.addChildNode(node)
+    }
+  }
+
   init() {
     let root = scene.rootNode
+    Self.addRiverPanorama(to: root)
     scene.background.contents = UIColor(red: 0.44,green: 0.67,blue: 0.78,alpha: 1)
     func box(_ x: CGFloat,_ y: CGFloat,_ z: CGFloat,_ at: V,_ color: UIColor) -> SCNNode {
       mesh(SCNBox(width:x,height:y,length:z,chamferRadius:0),color,root,at)
     }
-    let surround = UIColor(red:0.21,green:0.30,blue:0.42,alpha:1)
-    _ = box(42,0.09,44,V(0,-0.08,0),surround)
-    // Tier edges and side rails provide stable depth references behind the play.
-    for row in 0..<5 {
-      let height = CGFloat(row+1)*0.38, depth = Float(row)*0.72
-      let seat = row.isMultiple(of:2) ? UIColor(red:0.17,green:0.32,blue:0.44,alpha:1) : surround
-      _ = box(22,height,0.72,V(0,Float(height)/2,-9-depth),seat)
-      for side: Float in [-1,1] {
-        _ = box(0.72,height,17,V(side*(7+depth),Float(height)/2,-0.7),seat)
-      }
-    }
-    for side: Float in [-1,1] {
-      _ = box(0.08,0.08,16,V(side*5.8,0.68,-0.5),.lightGray)
-      for z: Float in [-8,-4,0,4,7] {
-        _ = box(0.06,0.68,0.06,V(side*5.8,0.34,z),.lightGray)
-      }
-    }
+    addRiversideHall(to:root)
     _ = box(6.1,0.045,13.4,V(0,-0.025,0),UIColor(red:0.13,green:0.42,blue:0.57,alpha:1))
     for z: Float in [-6.7,-5.94,-1.98,1.98,5.94,6.7] { _ = box(6.1,0.012,0.04,V(0,0,z),.white) }
     for x: Float in [-3.05,-2.59,2.59,3.05] { _ = box(0.04,0.012,13.4,V(x,0,0),.white) }
@@ -1412,18 +1658,6 @@ final class CourtScene {
       shadow.simdScale.z = 0.65
       player.groundShadow = shadow
     }
-    // A light canopy frames the backdrop without crossing the flight corridor.
-    for x: Float in [-8,8] {
-      for z: Float in [-13,-6,1] {
-        _ = box(0.17,5.2,0.17,V(x,2.6,z),.lightGray)
-      }
-      _ = box(3.6,0.12,17,V(x,5.18,-6.1),UIColor(red:0.71,green:0.83,blue:0.87,alpha:1))
-      for z: Float in [-11,-6,-1,4] {
-        _ = box(0.22,1.5,0.22,V(x*0.75,0.75,z),.brown)
-        let leaves = mesh(SCNSphere(radius:0.82),UIColor(red:0.23,green:0.53,blue:0.37,alpha:1),root,V(x*0.75,2.0,z))
-        leaves.simdScale.y = 1.18
-      }
-    }
     root.addChildNode(shuttle)
     cork = mesh(SCNSphere(radius:0.065),.systemYellow,shuttle)
     _ = mesh(SCNCone(topRadius:0.1,bottomRadius:0.04,height:0.17),.white,shuttle,V(0,0.1,0))
@@ -1433,8 +1667,8 @@ final class CourtScene {
     service = box(2.59,0.005,4.72,.zero,UIColor.systemMint.withAlphaComponent(0.28))
     camera.camera = SCNCamera()
     camera.camera?.fieldOfView = 43
-    camera.simdPosition = V(0,4.50,10.40)
-    camera.simdEulerAngles = V(-20 * .pi/180,0,0)
+    camera.simdPosition = V(0,2.35,8.35)
+    camera.simdEulerAngles = V(-10 * .pi/180,0,0)
     root.addChildNode(camera)
     for type in [SCNLight.LightType.ambient,.directional] {
       let lamp = SCNNode()
@@ -1546,6 +1780,9 @@ final class CourtScene {
         link(node,a.point,b.point)
       }
     }
+    let target = f.map { $0.netCollision ?? $0.to } ?? game.landing
+    landing.isHidden = target == nil
+    if let target { landing.simdPosition = world(Position(x:target.x,y:target.y)) + V(0,0.015,0) }
     // Track with translation only. Fixed pitch and court-aligned yaw/roll
     // keep the posts and painted cross-court lines level throughout a rally.
     let feet = world(Position(x:game.playerX,y:game.playerY))
@@ -1557,11 +1794,11 @@ final class CourtScene {
     let resetCamera = cameraTime == nil || dt < 0
     cameraTime = game.now
     let shoulderOffset: Float = left ? -0.85 : 0.85
-    let base = V(tracking.x+shoulderOffset,4.50,reduced ? 13.2 : 10.40+tracking.z)
-    camera.simdEulerAngles = V(-20 * .pi/180,0,0)
+    let base = V(tracking.x+shoulderOffset,reduced ? 4.50 : 2.35,reduced ? 13.2 : 8.35+tracking.z)
+    camera.simdEulerAngles = V((reduced ? -20 : -10) * .pi/180,0,0)
     // Lift and retreat together: a high clear gains headroom while the feet
     // stay inside the lower edge. Forecast the actual flight before its apex.
-    let retreat = V(0,1,1.4)
+    let retreat = reduced ? V(0,1,1.4) : V(0,0.65,1.8)
     var framing: Float = 0
     if reduced {
       framing = 1.6  // Fixed wider court view, with no tracking.
@@ -1581,6 +1818,36 @@ final class CourtScene {
     let blend: Float = reduced || resetCamera ? 1 : Float(1-exp(-response*min(0.2,max(0,dt))))
     overheadFraming += (framing-overheadFraming)*blend
     camera.simdPosition = base + retreat*overheadFraming
+    // A missed return can land behind the receiver. Slide straight back only
+    // as far as needed to keep the shoes and the approaching cork in frame.
+    if !reduced {
+      let halfFOV = Float(camera.camera!.fieldOfView) * .pi/360
+      let bottomAngle = -camera.simdEulerAngles.x + atan(0.91 * tan(halfFOV))
+      let cotangent = 1/tan(bottomAngle)
+      let eyeHeight = camera.simdPosition.y
+      var requiredZ = feet.z + 0.52 + eyeHeight*cotangent
+      if let f {
+        let cork = world(f.at(game.now))
+        requiredZ = max(requiredZ, cork.z + 0.16 + (eyeHeight-cork.y+0.12)*cotangent)
+      }
+      if !landing.isHidden {
+        let nearEdge = landing.simdPosition.z + Float(landing.boundingBox.max.z)
+        let ringBottom = landing.simdPosition.y + Float(landing.boundingBox.min.y)
+        let ringAngle = -camera.simdEulerAngles.x + atan(0.97 * tan(halfFOV))
+        requiredZ = max(requiredZ,nearEdge + (eyeHeight-ringBottom)/tan(ringAngle))
+        let sideExtent = abs(landing.simdPosition.x-camera.simdPosition.x) + Float(landing.boundingBox.max.x)
+        let ringTop = landing.simdPosition.y + Float(landing.boundingBox.max.y)
+        let depth = sideExtent/(0.97 * cameraAspect * tan(halfFOV))
+        let pitch = -camera.simdEulerAngles.x
+        requiredZ = max(requiredZ,nearEdge + (depth - (eyeHeight-ringTop)*sin(pitch))/cos(pitch))
+      }
+      let requiredRetreat = max(0,requiredZ-camera.simdPosition.z)
+      let decay: Float = resetCamera ? 0 : Float(exp(-4 * min(0.2,max(0,dt))))
+      baselineRetreat = max(requiredRetreat,baselineRetreat*decay)
+      camera.simdPosition.z += baselineRetreat
+    } else {
+      baselineRetreat = 0
+    }
     service.isHidden = game.phase != .serve || game.practice
     let half = Float(game.format.halfWidth)*3.05, near = !game.playerServes
     let sign: Float = (near ? game.nearServiceX : -game.nearServiceX) >= 0 ? 1 : -1
@@ -1588,9 +1855,6 @@ final class CourtScene {
     service.simdScale = V(half/2.59,1,(end-1.98)/4.72)
     service.simdPosition = V(sign*half/2,0.009,(near ? 1 : -1)*(end+1.98)/2)
     shuttle.isHidden = f == nil; shadow.isHidden = f == nil
-    let target = f.map { $0.netCollision ?? $0.to } ?? game.landing
-    landing.isHidden = target == nil
-    if let target { landing.simdPosition = world(Position(x:target.x,y:target.y)) + V(0,0.015,0) }
     intercept.isHidden = game.waitingForDescent || !(f.map { $0.incoming && game.now < $0.start + $0.duration } ?? false) || game.predictedIntercept == nil
     for (i,segment) in trail.enumerated() {
       segment.isHidden = reduced || f == nil
