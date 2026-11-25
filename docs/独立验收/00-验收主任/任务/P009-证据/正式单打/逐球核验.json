@@ -1,0 +1,27 @@
+{
+  "device": "89B4EB3F-3B23-4F9F-AA91-5D3AC77016A8",
+  "images_sha256": {
+    "BadmintonRally": "c78b318a0cc9bfdb14abc475170d00e3b733cad1a6ecad8c735dff1279dfafcb",
+    "BadmintonRally.debug.dylib": "09bd06f87ea130ca57b7bec15d36f3ebc3416a9ee765a5fbecda161bb287123e"
+  },
+  "input": "DEBUG simulated presses",
+  "score": [
+    "21",
+    "5"
+  ],
+  "video": {
+    "width": 1206,
+    "height": 2622,
+    "duration": "170.580000",
+    "nb_read_frames": "10435",
+    "side_data_list": [
+      {}
+    ]
+  },
+  "事件条数": 104,
+  "得分事件": 26,
+  "逐条逐字段与基线一致": true,
+  "差异记录数": 0,
+  "首个差异": [],
+  "回球次数": "50"
+}
