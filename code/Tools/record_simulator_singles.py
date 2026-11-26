@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 DEVICE = "89B4EB3F-3B23-4F9F-AA91-5D3AC77016A8"
-BUNDLE = "com.daokaihua.badmintonrally"
+BUNDLE = "cn.zhaodk.badmintonrally"
 
 
 def sim(*args, timeout=45):

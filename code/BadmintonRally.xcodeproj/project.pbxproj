@@ -271,7 +271,7 @@
 			buildSettings = {
 				DEVELOPMENT_TEAM = 4AN6PV98G7;
 				GENERATE_INFOPLIST_FILE = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = com.daokaihua.badmintonrally.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = cn.zhaodk.badmintonrally.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_TARGET_NAME = BadmintonRally;
@@ -283,7 +283,7 @@
 			buildSettings = {
 				DEVELOPMENT_TEAM = 4AN6PV98G7;
 				GENERATE_INFOPLIST_FILE = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = com.daokaihua.badmintonrally.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = cn.zhaodk.badmintonrally.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_TARGET_NAME = BadmintonRally;
@@ -330,7 +330,7 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationLandscapeRight;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.daokaihua.badmintonrally;
+				PRODUCT_BUNDLE_IDENTIFIER = cn.zhaodk.badmintonrally;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -351,7 +351,7 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationLandscapeRight;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.daokaihua.badmintonrally;
+				PRODUCT_BUNDLE_IDENTIFIER = cn.zhaodk.badmintonrally;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				TARGETED_DEVICE_FAMILY = 1;
 			};

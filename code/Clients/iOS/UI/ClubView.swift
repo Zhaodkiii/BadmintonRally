@@ -2,7 +2,7 @@ import AVFoundation
 import Combine
 import SwiftUI
 
-enum Page { case home, setup, airplay, court, pause, result, lab, settings, sync, jointCapture, motionTest, manualBatch, playerPreview }
+enum Page { case home, setup, airplay, court, pause, result, lab, settings, sync, jointCapture, motionTest, manualBatch, playerPreview, strokeValidation }
 struct ClubView: View {
   @ObservedObject private var studio = StudioSender.shared
   @StateObject private var motion = MotionInput()
@@ -78,7 +78,6 @@ struct ClubView: View {
   @AppStorage("bestRally") private var best = 0
   @Environment(\.scenePhase) private var lifecycle
   @Environment(\.accessibilityReduceMotion) private var reduced
-  let clock = Timer.publish(every: 1 / 60, on: .main, in: .common).autoconnect()
   let ink = Color(red: 0.045, green: 0.13, blue: 0.14)
   let cream = Color(red: 0.96, green: 0.94, blue: 0.86)
   let accent = Color(red: 0.97, green: 0.56, blue: 0.39)
@@ -87,15 +86,18 @@ struct ClubView: View {
     ZStack {
       ink.ignoresSafeArea()
       if page == .court || page == .pause || page == .result {
-        SpatialCourt(game: game, reduced: reduced, leftHanded: game.leftHanded, scene: matchCourt,
-                     poseUpdatedByMatchClock: injectingSingles)
-          .id(matchCourt.map(ObjectIdentifier.init)).ignoresSafeArea()
+        if let matchCourt {
+          SpatialCourt(scene:matchCourt,running:page == .court && lifecycle == .active,advance:{ tick() })
+            .id(ObjectIdentifier(matchCourt)).ignoresSafeArea()
+        }
         if page == .court {
           matchHUD
         } else {
           Color.black.opacity(0.65).ignoresSafeArea()
           if page == .pause { pauseCard } else { resultCard }
         }
+      } else if page == .strokeValidation {
+        StrokeValidationView(close: { page = .home })
       } else if page == .playerPreview {
         PlayerPreview { page = .home }
       } else if page == .manualBatch {
@@ -136,7 +138,6 @@ struct ClubView: View {
       startMatch()
     }
     #endif
-    .onReceive(clock) { _ in tick() }
     .onAppear {
       reconnectStudio()
 
@@ -191,6 +192,7 @@ struct ClubView: View {
           secondary("动作测试") { page = .motionTest }
         }
         HStack {
+          secondary("动作验证") { page = .strokeValidation }
           secondary("角色动作") { page = .playerPreview }
           secondary("投屏指南") { page = .airplay }
           secondary("设置") { page = .settings }
@@ -722,6 +724,7 @@ struct ClubView: View {
     if liveCapture.active { referenceGroup = liveCapture.match }
     flushLiveCapture(event: "start")
     #endif
+    matchCourt?.update(game,reduced:reduced,left:game.leftHanded)
     page = .court
     contactCount = 0
     startContactInput()
@@ -875,8 +878,10 @@ struct ClubView: View {
       contactCount += 1
       confirmContact(input, time: t)
     }
-    // SwiftUI may combine display updates. Advance the recording rig once per simulation tick.
-    if injectingSingles { matchCourt?.update(game, reduced: reduced, left: game.leftHanded) }
+    #endif
+    // Both live input and deterministic replay present the same simulation tick.
+    matchCourt?.update(game, reduced: reduced, left: game.leftHanded)
+    #if DEBUG && targetEnvironment(simulator)
     if points != game.pointCount { simulatorSingles?.record("point", game: game, detail: game.message) }
     #endif
     if validating && previousPhase != .point && game.phase == .point, let i = validation.trials.indices.last {

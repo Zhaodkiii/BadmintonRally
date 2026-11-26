@@ -11,27 +11,55 @@ private func world(_ p: Position) -> V {
 private typealias UIColor = NSColor
 #else
 struct SpatialCourt: UIViewRepresentable {
-  let game: Rally
-  let reduced, leftHanded: Bool
-  var scene: CourtScene? = nil
-  var poseUpdatedByMatchClock = false
-  func makeCoordinator() -> CourtScene { scene ?? CourtScene() }
+  let scene: CourtScene
+  let running: Bool
+  let advance: () -> Void
+
+  @MainActor final class Coordinator: NSObject {
+    weak var view: SCNView?
+    var advance: (() -> Void)?
+    private var displayLink: CADisplayLink?
+
+    func run(_ active: Bool) {
+      if !active {
+        displayLink?.invalidate()
+        displayLink = nil
+      } else if displayLink == nil {
+        let link = CADisplayLink(target:self,selector:#selector(frame))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum:60,maximum:60,preferred:60)
+        link.add(to:.main,forMode:.common)
+        displayLink = link
+      }
+    }
+
+    @objc private func frame() {
+      guard let view, view.window != nil else { return }
+      advance?()
+      view.setNeedsDisplay()
+    }
+  }
+
+  func makeCoordinator() -> Coordinator { Coordinator() }
   func makeUIView(context: Context) -> SCNView {
     let view = SCNView()
-    view.scene = context.coordinator.scene
-    view.pointOfView = context.coordinator.camera
+    view.scene = scene.scene
+    view.pointOfView = scene.camera
     view.antialiasingMode = .multisampling2X
+    view.preferredFramesPerSecond = 60
     view.isUserInteractionEnabled = false
+    context.coordinator.view = view
     return view
   }
   func updateUIView(_ view: SCNView, context: Context) {
     if view.bounds.height > 0 {
-      context.coordinator.cameraAspect = Float(view.bounds.width/view.bounds.height)
+      scene.cameraAspect = Float(view.bounds.width/view.bounds.height)
     }
-    if !poseUpdatedByMatchClock {
-      context.coordinator.update(game, reduced: reduced, left: leftHanded)
-    }
-    view.setNeedsDisplay()
+    context.coordinator.advance = advance
+    context.coordinator.run(running)
+  }
+  static func dismantleUIView(_ view: SCNView, coordinator: Coordinator) {
+    coordinator.run(false)
+    coordinator.advance = nil
   }
 }
 
@@ -268,6 +296,8 @@ private final class CourtPlayer {
     var gripRoll: Float = 0
     var elbowPlane: V?
     var lastHand: Float = 0
+    var stanceBlend: Float = 0
+    var strideMotion = V.zero
     var stridePhase: Float = 0
     var previous: V?
     var braceOffset = [Float](repeating:0,count:2)
@@ -337,7 +367,7 @@ private final class CourtPlayer {
     }
     // Ring meshes retain editable material groups after exporting the posed model.
     // The meridian direction supplies normals, including asymmetric temple and cheek profiles.
-    func rings(_ points: [[V]], colors: [UIColor], group: (Int, Int) -> Int = { _,_ in 0 }) -> SCNGeometry {
+    func rings(_ points: [[V]], colors: [UIColor], jerseyUV: Bool = false, group: (Int, Int) -> Int = { _,_ in 0 }) -> SCNGeometry {
       let columns = points[0].count
       var indices = [[Int32]](repeating:[], count:colors.count)
       var verts = [SCNVector3](), normals = [SCNVector3]()
@@ -359,7 +389,12 @@ private final class CourtPlayer {
           }
         }
       }
-      let geom = SCNGeometry(sources:[SCNGeometrySource(vertices:verts),SCNGeometrySource(normals:normals)],
+      var sources = [SCNGeometrySource(vertices:verts),SCNGeometrySource(normals:normals)]
+      if jerseyUV {
+        let uv = verts.map { v in CGPoint(x:CGFloat(v.x / 0.45 + 0.5), y:CGFloat((0.521-v.y)/0.571)) }
+        sources.append(SCNGeometrySource(textureCoordinates:uv))
+      }
+      let geom = SCNGeometry(sources:sources,
                              elements:indices.map { SCNGeometryElement(indices:$0,primitiveType:.triangles) })
       geom.materials = colors.map {
         let m = SCNMaterial(); m.diffuse.contents = $0; m.isDoubleSided = true; return m
@@ -491,8 +526,8 @@ private final class CourtPlayer {
 
     // Split the continuous shirt into sewing panels on ring boundaries.
     let pattern: [(Float,Float,Float,Float,Float)] = [
-      (-0.050,0.143,0.103,0.96,0.20),(-0.034,0.151,0.108,0.88,0.17), (0.020,0.159,0.116,0.68,0.13),
-      (0.110,0.149,0.109,0.45,0.16),(0.195,0.141,0.103,0.28,0.28),(0.290,0.157,0.122,0.25,0.42),
+      (-0.050,0.163,0.108,0.96,0.20),(-0.034,0.169,0.114,0.88,0.17), (0.020,0.159,0.116,0.68,0.13),
+      (0.110,0.149,0.109,0.45,0.16),(0.195,0.153,0.112,0.28,0.28),(0.290,0.157,0.122,0.25,0.42),
       (0.357,0.181,0.134,0.28,0.44),(0.420,0.192,0.124,0.21,0.53),(0.458,0.198,0.112,0.14,0.56),
       (0.486,0.164,0.106,0.08,0.54),(0.509,0.079,0.067,0.03,0.53),(0.521,0.069,0.062,0.03,0.53)]
     var shirtRings = [[V]]()
@@ -512,10 +547,25 @@ private final class CourtPlayer {
       shirtRings.append(row)
     }
     let seam = rival ? UIColor(red:0.62,green:0.51,blue:0.39,alpha:1) : UIColor(red:0.80,green:0.34,blue:0.27,alpha:1)
-    torso.geometry = rings(shirtRings,colors:[coral,seam,cream]) { i,j in
+    let cloth = rings(shirtRings,colors:[coral,seam,cream,coral],jerseyUV:!rival) { i,j in
       if i == pattern.count-2 { return 2 }
-      return (i == 0 || (i < 8 && (j<5 || (17..<22).contains(j)))) ? 1 : 0
+      if i == 0 || (i < 8 && (j<5 || (17..<22).contains(j))) { return 1 }
+      return !rival && shirtRings[i][j].z > 0 ? 3 : 0
     }
+    if !rival {
+      var backPanel = Bundle.main.url(forResource:"CoralJerseyBack",withExtension:"png")
+      #if os(macOS)
+      if backPanel == nil {
+        backPanel = URL(fileURLWithPath:FileManager.default.currentDirectoryPath)
+          .appendingPathComponent("code/Clients/iOS/Resources/CoralJerseyBack.png")
+      }
+      #endif
+      if let backPanel, FileManager.default.fileExists(atPath:backPanel.path) {
+        cloth.materials[3].diffuse.contents = backPanel
+        cloth.materials[3].diffuse.mipFilter = .linear
+      }
+    }
+    torso.geometry = cloth
     // Cut the waistband to the same axes as the jersey, then flare over both
     // hip sockets. The inseam rises between the moving thigh panels.
     let waistSections: [(y:Float,width:Float,depth:Float,rise:Float)] = [
@@ -740,19 +790,20 @@ private final class CourtPlayer {
       // A late forecourt pickup can still be live below the original meeting
       // point. Keep the lunge loaded until the shuttle leaves the near reach.
       let descendingPickup = lead < -0.02 && lead > -0.18 && target.y < 1.15
+      let opponent = facing > 0
       let lowForecourt = !rearCourt && !middleCourt && target.y < 1.30
-      tracksArrival = rearCourt || middleCourt || descendingPickup || lowForecourt
+      tracksArrival = opponent || rearCourt || middleCourt || descendingPickup || lowForecourt
       let stillReachable = tracksArrival && now <= f.start+f.duration &&
         simd_length(world(f.at(now))-feet-V(0,1,0)) < 1.8
       let horizontal = hypot(target.x,target.z)
       // Lower the racket as a running player approaches a low net feed.
       // At the old 1.55 m gate an already advanced arrival clock could jump
       // straight from guard to a loaded reaching pose in a single tick.
-      if lowForecourt {
-        let t = min(1,max(0,(2.20-horizontal)/0.65))
+      if opponent || lowForecourt {
+        let t = opponent ? min(1,max(0,(3.15-horizontal)/0.85)) : min(1,max(0,(2.20-horizontal)/0.65))
         approachWeight = t*t*(3-2*t)
       }
-      if (lead >= -0.06 || stillReachable) && lead < 0.42 && horizontal < (lowForecourt ? 2.20 : 1.55) {
+      if (lead >= -0.06 || stillReachable || (opponent && now <= f.start+f.duration)) && lead < 0.42 && horizontal < (opponent ? 3.15 : lowForecourt ? 2.20 : 1.55) {
         interceptLead = lead
         if tracksArrival {
           // Intercept anchors the feet. As the shuttle enters arm's reach,
@@ -802,6 +853,9 @@ private final class CourtPlayer {
     root.simdPosition = feet + V(0,lift,0)
     let step = distance > 0.0001 && !still ? sin(history.stridePhase)*0.22 : 0
     let travel = distance > 0.0001 ? delta/distance : V(0,0,facing)
+    // Decelerate the swing foot when the root reaches its intercept.
+    let strideTarget = travel*step
+    history.strideMotion += (strideTarget-history.strideMotion)*(continuous ? 1-exp(-26*frameTime) : 1)
     let clock = contactAge.map { Float($0) + 0.14 } ?? Float(elapsed)
     let active = clock >= 0 && clock < (confirmed ? 0.69 : 0.54)
     let high = confirmed ? world(outgoing!.from).y > 1.95 : readyHeight > 1.95 || lift > 0
@@ -861,7 +915,13 @@ private final class CourtPlayer {
     let lunge = reachDip*supportPhase
     // A receiver settles into an open split stance between shots. Ease it away
     // through preparation so the measured contact remains the IK target.
-    let guardWeight: Float = grounded ? (1-min(1,abs(step)/0.09))*(1-min(1,supportPhase*1.8))*(confirmed ? 0 : 1) : 0
+    // A zero crossing of the stride is mid-run, not a return to the split stance.
+    // Use actual ground speed and release the stance progressively on launch.
+    let speed = distance/max(0.001,frameTime)
+    let standing = min(1,max(0,(0.75-speed)/0.55))
+    let guardTarget:Float = grounded && !confirmed ? standing*(1-min(1,supportPhase*1.8)) : 0
+    history.stanceBlend += (guardTarget-history.stanceBlend)*(continuous ? 1-exp(-19*frameTime) : 1)
+    let guardWeight = history.stanceBlend
     // The reference receiver opens toward the racket side and loads the outside hip.
     // Fade this pose as the interception takes over so it cannot move the impact.
     let openGuard = guardWeight*(1-history.serveSetup)
@@ -1089,6 +1149,14 @@ private final class CourtPlayer {
       let step = frameTime * (block ? 2.7 : 4.2)
       if distance > step { tip = previousTip + movement*(step/distance) }
     }
+    // The intercept solver may acquire or release a reachable feed between ticks.
+    // Travel into the preparation pose, including the recovery of an unplayed feed.
+    if continuous, incoming != nil, !active, !missedAttempt {
+      let offset = tip - rim.simdPosition
+      let gap = simd_length(offset)
+      let budget = frameTime * (windup > 0 ? 9 : 5)
+      if gap > budget { tip = rim.simdPosition + offset*(budget/gap) }
+    }
     let axis = tip-shoulder
     let reachDirection = axis/max(simd_length(axis),0.001)
     // Let the body lean into a stretched return; keep the racket shaft rigid.
@@ -1114,7 +1182,7 @@ private final class CourtPlayer {
     let readyBase = confirmed ? min(1,max(0,(after-0.12)/0.17),max(0,(0.55-after)/0.12)) : 0
     for i in 0..<2 {
       let sign: Float = i == 0 ? -1 : 1
-      var ankle = V(sign*0.20,0.05 + lift*(sign > 0 ? 0.32 : 0.12),facing*(sign*side*lunge*1.7-sign*lift*0.22)) + travel*(sign*step)
+      var ankle = V(sign*0.20,0.05 + lift*(sign > 0 ? 0.32 : 0.12),facing*(sign*side*lunge*1.7-sign*lift*0.22)) + history.strideMotion*sign
       let loaded = max(0,sign*history.supportShift)
       ankle.x += sign*(0.125*guardWeight + 0.16*openGuard + 0.07*load + 0.21*loaded)
       // Receiver's racket foot trails toward the camera in the reference;
@@ -1152,6 +1220,15 @@ private final class CourtPlayer {
       let hip = hips + V(sign*0.12,0,0)
       let thigh: Float = 0.445, shin: Float = 0.445
       let limit = thigh+shin-0.001
+      if continuous {
+        // The stance anchor can be far behind the stride target at toe-off.
+        // Carry the visible ankle into the recovery step before applying leg reach.
+        let previous = shoes[i].simdPosition-delta-V(sign*history.braceOffset[i],-0.007,facing*0.045)
+        let change = ankle-previous
+        let cap = frameTime*4.6
+        let gap = simd_length(change)
+        if gap > cap { ankle = previous+change*(cap/gap) }
+      }
       ankle.y = max(ankle.y, hip.y-limit)
       let dy = ankle.y-hip.y
       let horizontal = V(ankle.x-hip.x,0,ankle.z-hip.z)
@@ -2387,7 +2464,7 @@ private final class PlayerLimbSkin {
     // The cloth has its own hem ring. The topology continues under it to the ankle.
     let rings: [Ring] = leg ? [
       (0.015,0.066,0.074),(0.046,0.090,0.097),(0.077,0.102,0.109),
-      (0.150,0.102,0.109),(0.192,0.100,0.104),(0.195,0.091,0.094),
+      (0.150,0.108,0.114),(0.188,0.112,0.114),(0.196,0.092,0.094),
       (0.252,0.083,0.089),(0.325,0.070,0.078),(0.396,0.058,0.064),
       (0.445,0.055,0.059),(0.486,0.052,0.055),(0.550,0.058,0.062),
       (0.607,0.060,0.066),(0.682,0.053,0.061),(0.767,0.039,0.047),
@@ -2403,7 +2480,7 @@ private final class PlayerLimbSkin {
     let sides = 20
     var vertices: [SCNVector3] = [], normals: [SCNVector3] = []
     var weights: [SIMD4<Float>] = [], indices: [SIMD4<UInt16>] = []
-    var skinFaces: [Int32] = [], clothFaces: [Int32] = [], accessoryFaces: [Int32] = []
+    var skinFaces: [Int32] = [], clothFaces: [Int32] = [], accessoryFaces: [Int32] = [], trimFaces: [Int32] = []
     for (i,ring) in rings.enumerated() {
       let prev = rings[max(0,i-1)], next = rings[min(rings.count-1,i+1)]
       let t = min(1,max(-1,(ring.y-upperLength)/(leg ? 0.085 : 0.060)))
@@ -2420,7 +2497,8 @@ private final class PlayerLimbSkin {
         if i+1 < rings.count {
           let a = Int32(i*sides+j), b = Int32(i*sides+(j+1)%sides), n = Int32(sides)
           let pair = [a,a+n,b,b,a+n,b+n]
-          if i < 5 { clothFaces += pair }
+          if leg && (i == 4 || ring.y == 0.776) { trimFaces += pair }
+          else if i < 5 { clothFaces += pair }
           else if (leg && ring.y >= 0.767) || (name == "RacketArm" && (0.502..<0.550).contains(ring.y)) {
             accessoryFaces += pair
           } else { skinFaces += pair }
@@ -2434,6 +2512,10 @@ private final class PlayerLimbSkin {
     }
     var sections = [skinFaces,clothFaces]
     var colors = [skin,cloth]
+    if !trimFaces.isEmpty {
+      sections.append(trimFaces)
+      colors.append(UIColor(red:0.95,green:0.84,blue:0.69,alpha:1))
+    }
     if !accessoryFaces.isEmpty {
       sections.append(accessoryFaces)
       colors.append(leg ? UIColor(red:0.96,green:0.92,blue:0.82,alpha:1) : UIColor(red:0.20,green:0.47,blue:0.47,alpha:1))

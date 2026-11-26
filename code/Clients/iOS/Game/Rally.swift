@@ -588,7 +588,8 @@ struct Rally {
       } else if progress >= 0.80 {
         let ball = f.at(now)
         let reachable = abs(opponentX - ball.x) < 0.41 && abs(opponentY - ball.y) < 0.18
-        if reachable && ball.y < 0.5 && now >= nextAI { feed() } else if progress >= 1 { award(true, "空当得分") }
+        if progress >= 1 { award(true, "空当得分") }
+        else if reachable && ball.y < 0.5 && now >= nextAI { feed() }
       }
     case .finished: break
     }
