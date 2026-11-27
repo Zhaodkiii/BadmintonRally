@@ -32,6 +32,8 @@ struct ButtonSwing {
     }
   }
 
+  var replayServeModel: ServeReadout?
+
   private func serveName(_ pre: [Frame], at t: Double) -> String? {
     var values: [Double] = []
     for (lo, hi) in [(0.24,0.16), (0.16,0.08), (0.08,0.0)] {
@@ -43,7 +45,7 @@ struct ButtonSwing {
       let g = bin.reduce(V.zero) { $0 + $1.gravity } / n
       values += [asinh(w.x/4),asinh(w.y/4),asinh(w.z/4),asinh(a.x),asinh(a.y),asinh(a.z),g.x,g.y,g.z]
     }
-    return Self.serveModel?.predict(values)
+    return (replayServeModel ?? Self.serveModel)?.predict(values)
   }
   private struct CornerModel: Decodable {
     let classes: [String], weights: [[Double]], bias: [Double]

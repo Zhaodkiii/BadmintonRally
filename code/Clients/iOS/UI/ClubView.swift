@@ -13,6 +13,8 @@ struct ClubView: View {
   #endif
   #if DEBUG && targetEnvironment(simulator)
   @State private var simulatorSingles: SimulatorSinglesInput?
+  @State private var rawSwingReplay: RawSwingReplay?
+  @State private var matchFrameLog: MatchFrameLog?
   #endif
   private var injectingSingles: Bool {
     #if DEBUG && targetEnvironment(simulator)
@@ -55,6 +57,11 @@ struct ClubView: View {
   @State private var training = false
   @State private var lesson = false
   @State private var useTV = false
+  private struct PendingContact {
+    let sample: ButtonSwing.Hit
+    let buttonTime, flightStart, scheduled: Double
+  }
+  @State private var pendingContact: PendingContact?
   @State private var lastTick = 0.0
   @State private var resumeAt = 0.0
   @State private var trial = StandardStroke.lift
@@ -124,9 +131,68 @@ struct ClubView: View {
     }
     .foregroundStyle(cream).tint(accent)
     #if DEBUG && targetEnvironment(simulator)
+    .overlay(alignment: .bottomLeading) {
+      if page == .court || page == .result, let matchFrameLog {
+        if let rawSwingReplay {
+          Text(rawSwingReplay.model == nil ? "原始输入·基线模型" : "原始输入·训练模型")
+            .font(.caption2).accessibilityIdentifier("match.audit.rawMode")
+            .offset(x: 230, y: -8)
+        }
+        if rawSwingReplay?.recordedReturnsDone == true {
+          Text("原始来球已复跑").font(.caption2).accessibilityIdentifier("match.audit.recordedReturns")
+            .offset(x: 140, y: -8)
+        }
+        if rawSwingReplay?.proofReady == true {
+          Text("真人挥拍单球已出球").font(.caption2).accessibilityIdentifier("match.audit.rawBall")
+            .offset(x: 140, y: -8)
+        }
+        if simulatorSingles?.completedNewFixtures == true {
+          Text("专项取证完成").font(.caption2).accessibilityIdentifier("match.audit.newActions")
+            .offset(x: 140, y: -8)
+        }
+        let frame = matchFrameLog.frame
+        HStack(spacing: 1) {
+          Color.white.frame(width: 3, height: 8)
+          Color(red: 1, green: 0, blue: 1).frame(width: 3, height: 8)
+          ForEach(0..<16) { bit in
+            (frame & (1 << bit) == 0 ? Color.black : Color.white)
+              .frame(width: 3, height: 8)
+          }
+          Text("SIM \(frame)").font(.caption2.monospacedDigit()).padding(.horizontal, 4)
+        }
+        .padding(3).background(.black)
+        .padding(.leading, 12).padding(.bottom, 8)
+        .accessibilityHidden(true).allowsHitTesting(false)
+      }
+    }
     .task {
-      guard ProcessInfo.processInfo.arguments.contains("-p006Singles"),
-            simulatorSingles == nil, page == .home else { return }
+      let arguments = ProcessInfo.processInfo.arguments
+      guard simulatorSingles == nil, page == .home else { return }
+      let rawOne = arguments.contains("-p038RawOne")
+      let rawFull = arguments.contains("-p038RawFull")
+      let recorded = arguments.contains("-p039Recorded")
+      let cued = arguments.contains("-p039Cued")
+      let timedMatch = arguments.contains("-p040TimedMatch")
+      if timedMatch || rawOne || rawFull || recorded || cued {
+        do {
+          let trained = rawOne ? arguments.contains("-p038Candidate") : rawFull && !arguments.contains("-p038Baseline")
+          rawSwingReplay = try RawSwingReplay(oneBall: rawOne, trained: trained, fixtureMode: recorded ? .recorded : cued ? .cued : nil, recordedTimingMatch: timedMatch)
+        } catch {
+          NSLog("Raw swing replay setup failed: %@", error.localizedDescription)
+          return
+        }
+      }
+      if timedMatch || rawOne || rawFull || recorded || cued || arguments.contains("-p035Match") || arguments.contains("-p035Coverage") || arguments.contains("-p037Audit") {
+        let documents = URL.documentsDirectory
+        let replay = SimulatorSinglesInput(output: documents.appendingPathComponent("P035-events.tsv"),
+                                           matchStrokes: true, coverage: arguments.contains("-p035Coverage"),
+                                           newActions: arguments.contains("-p037Audit"))
+        simulatorSingles = replay
+        matchFrameLog = MatchFrameLog(url: documents.appendingPathComponent("P035-frames.jsonl"))
+        replay.record("home", game: game, detail: "DEBUG simulator | explicit match entry | fixed 60 Hz")
+        return
+      }
+      guard arguments.contains("-p006Singles") else { return }
       let replay = SimulatorSinglesInput(output: URL.documentsDirectory.appendingPathComponent("P006-单打.tsv"))
       simulatorSingles = replay
       replay.record("home", game: game, detail: "DEBUG simulator | seed 6006 | fixed 60 Hz")
@@ -560,7 +626,14 @@ struct ClubView: View {
         }
         Spacer()
         HStack {
-          Text(hudMessage).bold().padding(7).background(
+          VStack(alignment: .leading, spacing: 3) {
+            Text(hudMessage).bold()
+            if let lead = game.receivingCueLead, (0...Rally.receivingCueDuration).contains(lead) {
+              ProgressView(value: 1 - lead / Rally.receivingCueDuration)
+                .tint(.white).frame(width: 138)
+                .accessibilityLabel("预计击球时机")
+            }
+          }.padding(7).background(
             game.hitWindowOpen ? Color.teal : ink.opacity(0.85), in: Capsule())
           Spacer()
           if !validating { secondary(game.armed ? "取消放网" : "预选放网") { toggleNet() } }
@@ -602,6 +675,15 @@ struct ClubView: View {
   }
 
   var hudMessage: String {
+    if game.recoveringFromFall { return "扑空失衡 · 起身恢复" }
+    if pendingContact != nil { return "已挥拍 · 迎球中" }
+    if let lead = game.receivingCueLead {
+      if game.hitWindowOpen { return "按键击球" }
+      if (0...Rally.receivingCueDuration).contains(lead) {
+        return lead > 0.30 ? "引拍准备" : "开始挥拍 · 亮起时按键"
+      }
+      if lead < -0.12 && game.message == "准备接球" { return "已错过预计击球点" }
+    }
     if game.stillApproachingLowFeed { return "正在追低球 · 尚未到位" }
     if game.waitingForDescent { return "球还太高 · 等下降" }
     if game.armed { return "下一拍放网" }
@@ -645,6 +727,7 @@ struct ClubView: View {
       Text("\(game.score[0])   :   \(game.score[1])").font(
         .system(size: 46, weight: .heavy, design: .rounded).monospacedDigit())
       Text("成功回球 \(game.returns) 次     最长回合 \(game.longest) 拍")
+        .accessibilityIdentifier("match.audit.result")
       }
       HStack {
         action("再来一局", "arrow.clockwise") { startMatch() }
@@ -653,6 +736,7 @@ struct ClubView: View {
     }
   }
   func startMatch() {
+    pendingContact = nil
     guard #available(iOS 17.2, *) else { contactHint = "音量键击球需要 iOS 17.2 或更高版本"; return }
     if !injectingSingles {
       switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -677,6 +761,7 @@ struct ClubView: View {
     game.leftHanded = injectingSingles ? false : left
     game.practice = training
     game.lessonEnabled = lesson
+    game.usesMatchStrokes = !training && !lesson && !repeating && !validating
     game.drill = drill
     game.playerServes = !training
     game.gamesToWin = training ? 1 : gamesToWin
@@ -712,7 +797,9 @@ struct ClubView: View {
     #if DEBUG && targetEnvironment(simulator)
     if let replay = simulatorSingles {
       game.seedSimulatorMatch(SimulatorSinglesInput.seed)
+      if let rawSwingReplay { motion.resetReplayInput(model: rawSwingReplay.model) }
       replay.record("start", game: game, detail: "formal singles | standard AI | one game")
+      matchFrameLog?.start()
     }
     #endif
     game.offset = useTV ? syncMS / 1000 : 0
@@ -757,6 +844,7 @@ struct ClubView: View {
     UIApplication.shared.isIdleTimerDisabled = true
   }
   func pause() {
+    pendingContact = nil
     stopContactInput()
     #if DEBUG
     if liveCapture.active { liveCapture.screen.update(nil) }
@@ -778,7 +866,28 @@ struct ClubView: View {
     motion.stop()
     UIApplication.shared.isIdleTimerDisabled = false
   }
-  private func confirmContact(_ sample: ButtonSwing.Hit, time: Double) {
+  private func confirmContact(_ sample: ButtonSwing.Hit, time: Double, allowBuffer: Bool = true) {
+    if allowBuffer, let pendingContact, pendingContact.flightStart == game.flight?.start {
+      #if DEBUG && targetEnvironment(simulator)
+      simulatorSingles?.record("duplicate", game: game, detail: "等待当前按键触球")
+      #endif
+      return
+    }
+    // ButtonSwing already filters sensor noise and returns zero power and sweep
+    // for a bare tap. Let short, deliberate blocks queue like stronger strokes.
+    if allowBuffer, sample.impact.power > 0, sample.impact.sweep > 0,
+       let scheduled = game.bufferedContactTime, let flight = game.flight {
+      pendingContact = PendingContact(sample: sample, buttonTime: time, flightStart: flight.start, scheduled: scheduled)
+      #if DEBUG && targetEnvironment(simulator)
+      simulatorSingles?.record("buffered", game: game, detail: "scheduled=\(scheduled) | stroke=\(sample.stroke.rawValue)")
+      #endif
+      #if DEBUG
+      if liveCapture.active {
+        liveCapture.add(.init(time: time, kind: "bufferedContact", text: "迎球中", gameTime: game.now))
+      }
+      #endif
+      return
+    }
     let kind = sample.stroke, aim = sample.aim, impact = sample.impact
     let before = game.feedback
     let isServe = game.phase == .serve && game.playerServes
@@ -788,8 +897,9 @@ struct ClubView: View {
       matchCourt?.canContact(candidate, left: candidate.leftHanded) == true
     }
     #if DEBUG && targetEnvironment(simulator)
+    let played = decision == .accepted ? game.flight?.matchStroke?.rawValue : nil
     simulatorSingles?.record("press", game: game,
-      detail: "\(isServe ? "serve" : "return") | \(kind.rawValue) | \(decision.rawValue) | \(game.message)")
+      detail: "\(isServe ? "serve" : "return") | \(kind.rawValue) | \(decision.rawValue) | \(played ?? "-") | \(game.message) | input=\(impact.label ?? kind.rawValue) power=\(impact.power) sweep=\(impact.sweep) vertical=\(impact.verticalSweep) lateral=\(impact.lateralSweep)")
     #endif
     if validating && isServe && decision == .accepted {
       validation.trials.append(.init(number: game.repetition, contactTime: time,
@@ -797,7 +907,7 @@ struct ClubView: View {
       saveValidation()
     }
     if isServe && decision == .accepted {
-      lastServeReadout = "本次发球 · " + (sample.recognizedServe ?? "动作待定")
+      lastServeReadout = "本次发球 · " + (game.flight?.matchStroke?.rawValue ?? sample.recognizedServe ?? "动作待定")
     } else if decision == .accepted {
       lastServeReadout = ""
     }
@@ -853,7 +963,8 @@ struct ClubView: View {
       if repeating && decision == .accepted { flushLiveCapture(event: "contact") }
     }
     #endif
-    if game.feedback != before {
+    let flightIsScheduled = game.flight.map { $0.start > game.now } ?? false
+    if game.feedback != before && !flightIsScheduled {
       feedback.play(
         game.lastShot == .smash || game.lastShot == .power ? "smash" : "tap", sound: sound,
         vibration: haptic)
@@ -871,17 +982,43 @@ struct ClubView: View {
     guard contactReady else { return }
     let previousPhase = game.phase
     let previousFlight = game.flight?.start
+    let previousTime = game.now
     let points = game.pointCount
     game.tick(dt)
+    if let pending = pendingContact {
+      if game.phase != .flight || game.flight?.incoming != true || pending.flightStart != game.flight?.start {
+        pendingContact = nil
+      } else if game.now >= pending.scheduled {
+        pendingContact = nil
+        confirmContact(pending.sample, time: pending.buttonTime, allowBuffer: false)
+      }
+    }
+    if let flight = game.flight, !flight.incoming, flight.matchStroke?.isServe == true,
+       previousTime < flight.start, game.now >= flight.start {
+      feedback.play("tap", sound: sound, vibration: haptic)
+    }
     #if DEBUG && targetEnvironment(simulator)
-    if let replay = simulatorSingles, let input = replay.input(for: game) {
-      contactCount += 1
-      confirmContact(input, time: t)
+    if let replay = simulatorSingles {
+      let replayHit: ButtonSwing.Hit?
+      if let rawSwingReplay {
+        rawSwingReplay.prepare(&game, audit: replay)
+        replayHit = rawSwingReplay.input(game, motion: motion, audit: replay)
+      } else {
+        replay.prepare(&game)
+        replayHit = replay.input(for: game)
+      }
+      if let input = replayHit {
+        contactCount += 1
+        confirmContact(input, time: t)
+      }
     }
     #endif
     // Both live input and deterministic replay present the same simulation tick.
     matchCourt?.update(game, reduced: reduced, left: game.leftHanded)
     #if DEBUG && targetEnvironment(simulator)
+    rawSwingReplay?.observe(game)
+    matchFrameLog?.append(game, sample: matchCourt?.nearContactSample(),
+                          animation: matchCourt?.matchAnimationAudit, hostTime: t)
     if points != game.pointCount { simulatorSingles?.record("point", game: game, detail: game.message) }
     #endif
     if validating && previousPhase != .point && game.phase == .point, let i = validation.trials.indices.last {
@@ -907,6 +1044,7 @@ struct ClubView: View {
       finish()
       #if DEBUG && targetEnvironment(simulator)
       simulatorSingles?.record("finished", game: game, detail: "result page | " + game.message)
+      matchFrameLog?.finish()
       #endif
     }
   }

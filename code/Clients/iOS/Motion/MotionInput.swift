@@ -28,6 +28,15 @@ final class MotionInput: ObservableObject {
     playing = true
     start()
   }
+  func appendButtonSample(_ t: Double, rotation: SIMD3<Double>, acceleration: SIMD3<Double>, gravity: SIMD3<Double>) {
+    buttonSwing.append(t, rotation, acceleration, gravity)
+  }
+  #if DEBUG && targetEnvironment(simulator)
+  func resetReplayInput(model: ButtonSwing.ServeReadout?) {
+    buttonSwing = ButtonSwing()
+    buttonSwing.replayServeModel = model
+  }
+  #endif
   func buttonHit(_ t: Double, left: Bool, serving: Bool) -> ButtonSwing.Hit {
     buttonSwing.press(t, left: left, serving: serving, bank: reviewedCourt, intent: buttonIntent)
   }
@@ -264,7 +273,7 @@ final class MotionInput: ObservableObject {
     let g = d.gravity
     let q = d.attitude.quaternion
     if buttonMode {
-      buttonSwing.append(t, .init(r.x,r.y,r.z), .init(a.x,a.y,a.z), .init(g.x,g.y,g.z))
+      appendButtonSample(t, rotation: .init(r.x,r.y,r.z), acceleration: .init(a.x,a.y,a.z), gravity: .init(g.x,g.y,g.z))
       onTestFrame?(.init(time: t, rotation: [r.x,r.y,r.z], acceleration: [a.x,a.y,a.z],
                          gravity: [g.x,g.y,g.z], quaternion: [q.x,q.y,q.z,q.w],
                          armed: true, tracking: false, trigger: nil, gripSimilarity: nil))

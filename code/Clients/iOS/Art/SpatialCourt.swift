@@ -237,6 +237,17 @@ private func courtShoe(_ parent:SCNNode, cream:UIColor, coral:UIColor) {
   }
 }
 
+struct MatchAnimationAudit {
+  let action, phase: String
+  let time, sampleTime: Double
+  let racketCenter, grip, leftFoot, rightFoot, elbow, wrist, root: SIMD3<Float>
+  let target: SIMD3<Float>?
+  let racketError: Float?
+  let surfaceContact: Bool?
+  let assetReady: Bool
+  let surfaceMode: String
+}
+
 struct CourtContactSample {
   let time: Double
   // The two bed vectors span the world-space inner semi-axes.
@@ -744,6 +755,10 @@ private final class CourtPlayer {
     segment("freePair",freeElbow,freeHand)
   }
   var tipInWorld: V { root.simdPosition + rim.simdPosition }
+  var motionFeet: (left: V, right: V) {
+    (shoes[0].simdWorldPosition + V(0, 0.025, 0.045),
+     shoes[1].simdWorldPosition + V(0, 0.025, 0.045))
+  }
   func pose(_ feet: V, side: Float, facing: Float, now: Double, elapsed: Double,
             stroke: Stroke, impact: SwingImpact?, incoming: Flight?, outgoing: Flight?, intercept: Position?, still: Bool, point: Int? = nil, attemptedAt: Double? = nil, rivalReadiness: Float = 0, serving: Bool = false) {
     let interval = now - (history.armTime ?? now)
@@ -2044,6 +2059,27 @@ final class CourtScene {
   private let shuttle = SCNNode()
   private let cork: SCNNode
   private lazy var contactProbe = CourtPlayer(SCNNode(),.white)
+  #if os(iOS)
+  private var matchAnimation: MatchStrokeAnimation?
+  private var attemptedMatchAnimation = false
+  #endif
+  var matchAnimationAudit: MatchAnimationAudit? {
+    #if os(iOS)
+    matchAnimation?.audit
+    #else
+    nil
+    #endif
+  }
+
+  #if os(iOS)
+  private func prepareMatchAnimation() -> MatchStrokeAnimation? {
+    if !attemptedMatchAnimation {
+      attemptedMatchAnimation = true
+      matchAnimation = MatchStrokeAnimation(parent: scene.rootNode)
+    }
+    return matchAnimation
+  }
+  #endif
   private let shadow, landing, intercept, service: SCNNode
   private static func courtTexture(_ name: String, _ ext: String) -> URL? {
     if let url = Bundle.main.url(forResource: name, withExtension: ext) { return url }
@@ -2248,6 +2284,11 @@ final class CourtScene {
 
   func nearContactSample() -> CourtContactSample? {
     guard let time = cameraTime, !shuttle.isHidden else { return nil }
+    #if os(iOS)
+    if let sample = matchAnimation?.contactSample(time: time, cork: cork.simdWorldPosition, radius: corkRadius) {
+      return sample
+    }
+    #endif
     return players[0].contactSample(time:time, corkCenter:cork.simdWorldPosition, corkRadius:corkRadius)
   }
 
@@ -2258,6 +2299,11 @@ final class CourtScene {
 
   func canContact(_ candidate: Rally, left: Bool) -> Bool {
     guard let flight = candidate.flight, !flight.incoming else { return false }
+    #if os(iOS)
+    if candidate.usesMatchStrokes, let event = candidate.matchStrokeEvent {
+      return prepareMatchAnimation()?.canContact(event) == true
+    }
+    #endif
     contactProbe.copyPoseHistory(from:players[0])
     poseNear(contactProbe, game:candidate, left:left)
     let sample = contactProbe.contactSample(time:candidate.now, corkCenter:world(flight.from), corkRadius:corkRadius)
@@ -2277,12 +2323,23 @@ final class CourtScene {
   }
 
   func nearRacketError(to contact: Position) -> Float {
-    simd_distance(players[0].tipInWorld, world(contact))
+    simd_distance(matchAnimationAudit?.racketCenter ?? players[0].tipInWorld, world(contact))
   }
   func update(_ game: Rally,reduced: Bool,left: Bool) {
     traditionalHall.isHidden = paintedHall != nil && !reduced
     paintedHall?.isHidden = reduced
     poseNear(players[0], game:game, left:left)
+    var heldShuttle: V?
+    #if os(iOS)
+    if game.usesMatchStrokes, let animated = prepareMatchAnimation() {
+      animated.update(game, motionFeet: players[0].motionFeet)
+      players[0].root.isHidden = true
+      heldShuttle = animated.heldShuttle
+    } else {
+      matchAnimation?.hide()
+      players[0].root.isHidden = false
+    }
+    #endif
     let f = game.flight
     for i in players.indices.dropFirst() {
       let near = i.isMultiple(of:2), main = i<2
@@ -2323,7 +2380,7 @@ final class CourtScene {
     trailContact = attack
     if attack != nil {
       tipHistory.removeAll { game.now-$0.time > 0.083 || $0.time >= game.now }
-      tipHistory.append((game.now, players[0].tipInWorld))
+      tipHistory.append((game.now, matchAnimationAudit?.racketCenter ?? players[0].tipInWorld))
     }
     for (i,node) in racketTrail.enumerated() {
       let end = tipHistory.count-1-i
@@ -2415,14 +2472,17 @@ final class CourtScene {
     let end = Float(6.7-game.format.backLine*13.4)
     service.simdScale = V(half/2.59,1,(end-1.98)/4.72)
     service.simdPosition = V(sign*half/2,0.009,(near ? 1 : -1)*(end+1.98)/2)
-    shuttle.isHidden = f == nil; shadow.isHidden = f == nil
+    shuttle.isHidden = f == nil && heldShuttle == nil
+    shadow.isHidden = shuttle.isHidden
+    let actualBallSize: Float = game.usesMatchStrokes ? 0.24 : 1
+    shuttle.simdScale = V(repeating: actualBallSize)
     intercept.isHidden = game.waitingForDescent || !(f.map { $0.incoming && game.now < $0.start + $0.duration } ?? false) || game.predictedIntercept == nil
     for (i,segment) in trail.enumerated() {
       segment.isHidden = reduced || f == nil
       if let f, !reduced {
         let step = f.shot == .clear || f.shot == .weak ? 0.024 : 0.014
         let end = game.now - Double(trail.count-1-i)*step
-        segment.isHidden = end <= f.start || end-step >= f.start+f.duration
+        segment.isHidden = heldShuttle != nil || end <= f.start || end-step >= f.start+f.duration
         let color: UIColor
         switch f.shot {
         case .clear, .weak: color = .systemMint
@@ -2434,7 +2494,12 @@ final class CourtScene {
         link(segment,world(f.at(end-step)),world(f.at(end)))
       }
     }
-    if let f {
+    if let heldShuttle {
+      shuttle.simdPosition = heldShuttle
+      shuttle.simdOrientation = simd_quatf(angle: 0, axis: V(0, 1, 0))
+      shadow.simdPosition = V(heldShuttle.x, 0.015, heldShuttle.z)
+    }
+    if let f, heldShuttle == nil {
       let ball = world(f.at(game.now))
       shuttle.simdPosition = ball
       let velocity = world(f.at(game.now+0.008))-world(f.at(game.now-0.008))
